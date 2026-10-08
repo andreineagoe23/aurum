@@ -1,0 +1,5 @@
+# Live trading is OUT OF SCOPE for v1. Leave live_enabled false.
+# Even if true, live orders additionally require AURUM_MODE=LIVE and the exact AURUM_LIVE_ACK phrase.
+live_enabled: false
+signed_off_date: null    # YYYY-MM-DD, required when live_enabled is true
+signed_off_by: null

@@ -1,0 +1,12 @@
+# All times are Europe/London wall-clock, converted to UTC with zoneinfo (DST-aware).
+timezone: Europe/London
+
+sessions:
+  london_morning: { start: "07:00", end: "11:00" }
+  ldn_ny_overlap: { start: "13:00", end: "16:30" }
+
+# Minutes before the first session start in which the system warms up (PRE_SESSION).
+pre_session_minutes: 30
+no_new_entries_after: "19:30"
+force_flat_at: "20:00"
+trading_days: [MON, TUE, WED, THU, FRI]

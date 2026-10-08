@@ -1,0 +1,11 @@
+# Provisional demo safety controls. NOT optimised and never tuned for performance.
+risk_per_trade_pct: 0.25          # % of equity risked between entry and stop
+max_open_positions: 1
+max_trades_per_day: 3
+daily_loss_limit_pct: 1.0
+weekly_loss_limit_pct: 2.5
+consecutive_loss_cooldown: 2      # this many consecutive losses -> locked out for rest of session
+max_spread_points: null           # TODO(Phase 2): calibrate from collected spread stats. DEMO refuses while null.
+max_spread_atr_fraction: 0.15     # spread vs M15 ATR
+min_minutes_before_cutoff: 45     # no new entries within this many minutes of force_flat_at
+stale_quote_seconds: 10

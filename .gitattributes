@@ -1,0 +1,6 @@
+# Repo is edited on macOS and run inside a Windows VM: pin line endings.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.parquet binary
+*.sqlite binary

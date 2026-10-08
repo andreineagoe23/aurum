@@ -1,0 +1,20 @@
+# Fusion Markets MT5 "Zero" account (raw spread + commission). DEMO ONLY.
+# Live gating lives in promotion.yaml + environment, never here.
+name: fusion_markets_zero
+account_type: zero
+account_currency: USD
+
+# The broker's exact gold symbol is discovered at runtime (`aurum mt5 symbols --find gold`).
+# Candidates are tried in order; the first one the terminal knows wins.
+symbol_candidates: [XAUUSD, XAUUSD., XAUUSD.r, XAUUSD+, GOLD]
+symbol_search_terms: [XAU, GOLD]
+
+commission:
+  # $4.50 per 1.0 lot round trip == $2.25 per side.
+  per_lot_per_side: 2.25
+  currency: USD
+
+# PROVISIONAL. Recalibrated from demo fills in Phase 8. Points = symbol `point` units.
+slippage:
+  model: fixed_points
+  points_per_side: 5

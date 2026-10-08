@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Data and artefacts (never committed)
+/data/
+*.parquet
+*.sqlite
+*.sqlite3
+/KILL
+reports/*
+!reports/.gitkeep
+!reports/phase_*.md
+models/**/*
+!models/*/
+!models/*/.gitkeep
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
