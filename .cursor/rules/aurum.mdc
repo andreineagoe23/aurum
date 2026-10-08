@@ -1,0 +1,38 @@
+---
+description: Aurum core rules — intraday XAUUSD MT5 demo-only trading research platform
+globs:
+alwaysApply: true
+---
+
+# Aurum — core rules
+
+Full spec: `docs/MASTER_PROMPT.md`. Working conventions: `CLAUDE.md`. Read both first.
+
+## Mandate (v1, frozen)
+- Fusion Markets MT5 Zero **demo only**; XAUUSD symbol discovered at runtime.
+- Intraday only; flat before 20:00 London force-flat; no overnight/weekend exposure.
+- H1 = regime, M15 = setup/invalidation, M5 = trigger, ticks/M1 = execution realism.
+- Completed candles only (a 10:35 decision sees the H1 bar that closed 10:00); as-of joins on close time.
+- One position at a time; broker-side stop loss on every trade.
+- Costs: $2.25/lot/side commission, real bid/ask spread, configurable slippage.
+- Deterministic rules first; ML later as meta-filter only; no DL/RL.
+
+## Non-negotiable safety rules
+- Live trading blocked by default (`aurum.core.safety`): non-demo accounts need AURUM_MODE=LIVE + exact AURUM_LIVE_ACK + promotion.yaml sign-off. BACKTEST/SHADOW never send orders.
+- Strategies return Signals only; `OrderIntent` requires an approved `RiskDecision` and a `stop_loss`.
+- Idempotency key on every order; reconcile on startup and after every action.
+- Force-flat must work after disconnect/restart. Kill switch via `KILL` file / `aurum kill`.
+- Never use a bar before its close time; buys fill at ask, sells at bid.
+- Record every trial in the ledger; never report only the best; never tune on the sealed test; never auto-promote.
+- Secrets only in `.env`; never log passwords.
+- Never weaken a safety rule to make something work — raise it with the user.
+
+## How to work
+- One phase at a time; stop and ask before the next. Phase report in `reports/phase_<n>.md`; ADR per important decision.
+- Small conventional commits (`feat:`, `fix:`, `test:`, `docs:`, `refactor:`), no attribution trailers.
+- Tests with the code; `uv run ruff check && uv run mypy && uv run pytest` must be green.
+- Type hints everywhere; docstrings state units (price/points/lots/money) and time semantics (open vs close, UTC).
+- Aware UTC datetimes only; inject `ClockPort` instead of calling `datetime.now`.
+- `MetaTrader5` imported only inside functions in `aurum/adapters/mt5/`.
+- Ask when ambiguity affects trading logic, risk or data correctness. Too-good results → suspect a leak.
+- Never add a dependency without stating why.
