@@ -89,6 +89,7 @@ WRITES = [
 # --------------------------------------------------------------------------- loader
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="non-Windows behaviour")
 def test_package_imports_on_macos_without_metatrader5() -> None:
     assert "MetaTrader5" not in sys.modules
 

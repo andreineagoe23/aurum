@@ -6,8 +6,8 @@
 * Safety-relevant caps (e.g. risk per trade <= 1%) are validated here as a second line of defence.
 """
 
+import os
 import re
-import sys
 from dataclasses import dataclass
 from datetime import date, time
 from itertools import pairwise
@@ -304,8 +304,8 @@ def find_project_root(start: Path | None = None) -> Path:
 
 
 def default_data_dir(project_root: Path) -> Path:
-    """Windows: C:\\aurum-data (keep big data off the shared folder). Elsewhere: ./data."""
-    if sys.platform == "win32":
+    """Windows: C:\\aurum-data (keep big data out of the repo). Elsewhere: ./data."""
+    if os.name == "nt":  # not sys.platform: mypy would mark one branch unreachable per OS
         return Path("C:/aurum-data")
     return project_root / "data"
 
