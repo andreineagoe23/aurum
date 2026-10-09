@@ -1,6 +1,6 @@
 """``aurum`` command line. Commands for later phases exist as placeholders that exit with code 2."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NoReturn
 from zoneinfo import ZoneInfo
@@ -9,9 +9,11 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
+from aurum.adapters.storage.layout import DataLayout
 from aurum.core.clock import SystemClock
 from aurum.core.errors import AurumError, ConfigError
 from aurum.core.timeframes import Timeframe
+from aurum.data.reports import write_report
 from aurum.ledger.trial_ledger import TrialLedger
 from aurum.monitoring.doctor import Status, run_checks
 from aurum.monitoring.logging import configure_logging
@@ -81,12 +83,12 @@ def _settings_or_exit() -> Settings:
         raise typer.Exit(1) from exc
 
 
-def _connected_broker() -> tuple["MT5Broker", Settings]:
-    """Load settings, configure JSON logs (stderr) and connect, or exit 1 with the reason."""
+def _connected_broker(log_file: Path | None = None) -> tuple["MT5Broker", Settings]:
+    """Load settings, configure JSON logs (stderr or ``log_file``) and connect, or exit 1."""
     from aurum.adapters.mt5 import MT5Broker
 
     settings = _settings_or_exit()
-    configure_logging()
+    configure_logging(file=log_file)
     broker = MT5Broker(settings)
     try:
         broker.connect()
@@ -194,12 +196,71 @@ def mt5_bars(
 # ---------------------------------------------------------------------------- data (Phase 2)
 @data_app.command("backfill")
 def data_backfill(
-    tf: Annotated[str, typer.Option(help="Comma-separated timeframes")] = "M1,M5,M15,H1",
-    ticks: Annotated[bool, typer.Option(help="Also backfill ticks")] = False,
-    from_: Annotated[str | None, typer.Option("--from", help="YYYY-MM-DD (UTC)")] = None,
+    tf: Annotated[
+        str | None, typer.Option(help="Comma-separated timeframes (default: data.yaml)")
+    ] = None,
+    ticks: Annotated[bool, typer.Option(help="Backfill ticks")] = True,
+    bars: Annotated[bool, typer.Option(help="Backfill bars")] = True,
+    from_: Annotated[
+        str | None,
+        typer.Option("--from", help="YYYY-MM-DD UTC (default: measured depth in data.yaml)"),
+    ] = None,
+    to: Annotated[
+        str | None, typer.Option(help="YYYY-MM-DD UTC, inclusive (default: yesterday)")
+    ] = None,
+    refetch_empty: Annotated[
+        bool, typer.Option(help="Ask again for days stored empty; replace them if data appeared")
+    ] = False,
+    log_file: Annotated[Path | None, typer.Option(help="Append JSON logs to this file")] = None,
 ) -> None:
-    """Backfill bars/ticks in bounded, idempotent chunks."""
-    _not_yet("data backfill", 2)
+    """Backfill complete UTC days of broker ticks and bars into immutable raw Parquet.
+
+    Idempotent and resumable: days already stored are skipped.
+    """
+    from aurum.data.backfill import Backfiller
+    from aurum.data.market_hours import MarketHours
+
+    broker, settings = _connected_broker(log_file)
+    cfg = settings.config.data.backfill
+    timeframes = [Timeframe.parse(t) for t in (tf.split(",") if tf else cfg.timeframes)]
+    start = date.fromisoformat(from_) if from_ else None
+    end = date.fromisoformat(to) if to else None
+    layout = DataLayout(settings.data_dir)
+    layout.ensure()
+    filler = Backfiller(
+        broker, layout, cfg, MarketHours(settings.config.data.market), clock=SystemClock()
+    )
+    results = []
+    try:
+        symbol = broker.resolve_symbol()
+        if ticks:
+            results.append(
+                filler.ticks(symbol, start or cfg.ticks_from, end, refetch_empty=refetch_empty)
+            )
+        if bars:
+            for timeframe in timeframes:
+                results.append(
+                    filler.bars(
+                        symbol, timeframe, start or cfg.bars_from, end, refetch_empty=refetch_empty
+                    )
+                )
+    finally:
+        broker.disconnect()
+    table = Table(title=f"backfill {symbol}")
+    for col in ("dataset", "files written", "rows", "skipped (exist)", "refilled", "empty days"):
+        table.add_column(col)
+    for r in results:
+        table.add_row(
+            r.dataset,
+            str(r.written),
+            str(r.rows),
+            str(r.skipped_existing),
+            str(r.refilled),
+            ", ".join(r.empty_days) or "-",
+        )
+    console.print(table)
+    report = write_report(layout, "backfill", {"symbol": symbol, "results": results})
+    console.print(f"report: {report}")
 
 
 @data_app.command("collect")

@@ -125,3 +125,16 @@ def test_data_collect_runs_and_stops(fake_terminal: FakeMT5, tmp_path: Path) -> 
     assert list((tmp_path / "specs" / "XAUUSD").glob("*.json"))  # spec snapshot on connect
     assert "collector.exit" in log.read_text(encoding="utf-8")
     assert not (tmp_path / "collector" / "STOP").exists()
+
+
+def test_data_backfill_writes_days_and_report(fake_terminal: FakeMT5, tmp_path: Path) -> None:
+    ms = fake_terminal.server_s(datetime(2026, 10, 7, 12, tzinfo=UTC)) * 1000
+    fake_terminal.tick_rows = [{"time_msc": ms + i, "bid": 4142.7, "ask": 4142.8} for i in range(5)]
+    args = ["data", "backfill", "--tf", "H1", "--from", "2026-10-06", "--to", "2026-10-07"]
+    result = runner.invoke(app, args, env={"COLUMNS": "200"})
+    assert result.exit_code == 0, result.output
+    ticks = sorted(p.name for p in (tmp_path / "raw_ticks/mt5_history/XAUUSD").iterdir())
+    assert ticks == ["2026-10-06.parquet", "2026-10-07.parquet"]
+    assert len(list((tmp_path / "raw_broker_bars/mt5/XAUUSD/H1").iterdir())) == 2
+    assert list((tmp_path / "quality_reports" / "backfill").glob("*.json"))
+    assert "2026-10-06" in result.output  # a weekday with no data is listed as empty
