@@ -129,24 +129,62 @@ Then: Remote-SSH -> Connect to Host -> `aurum-vm`, and open the folder `C:\code\
 
 ### 7.4 Workaround: install the Cursor server manually
 
-If the automatic server install keeps failing or timing out (the remote side downloads and unpacks the Cursor server inside the VM), install it by hand:
+If the automatic server install times out, install it by hand. The server lives in
 
-1. On the Mac, find Cursor's **commit id**: Cursor -> About Cursor (the "Commit" line).
-2. Download the Cursor server (remote extension host) archive for that exact commit and the VM's platform, e.g. on the Mac, and copy it to the VM with `scp <archive> aurum-vm:`.
-3. In the VM, remove any half-installed copy and extract the archive into the directory Cursor expects:
+```
+%USERPROFILE%\.cursor-server\bin\win32-arm64\<commit>
+```
 
-   ```powershell
-   $Commit = '<commit-id>'
-   $Dest = "$env:USERPROFILE\.cursor-server\bin\$Commit"
-   Remove-Item -Recurse -Force $Dest -ErrorAction SilentlyContinue
-   New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-   tar -xzf "$env:USERPROFILE\<archive>" -C $Dest --strip-components 1
+Note the `win32-arm64` level between `bin` and the commit.
+
+1. Find the **commit id**. It is in the Cursor Remote-SSH log (Output panel -> Remote - SSH), in the line
+
+   ```
+   Downloading from https://cursor.blob.core.windows.net/remote-releases/<commit>/vscode-reh-win32-arm64.tar.gz
    ```
 
-   The server's entry files (e.g. `node.exe`, `bin\`) must sit directly under `$Dest`, not in a nested folder.
-4. Reconnect from Cursor. It finds the server for its commit and skips the download.
+   and also under About Cursor -> Commit.
+2. In a normal (non-elevated) PowerShell in the VM, as the SSH user:
 
-Repeat after every Cursor update: the commit id changes, so the server directory does too. Old `bin\<commit>` directories can be deleted.
+   ```powershell
+   $c = "<commit>"
+   $d = "$env:USERPROFILE\.cursor-server\bin\win32-arm64\$c"
+   New-Item -ItemType Directory -Force $d | Out-Null
+   Remove-Item "$d\cursor-remote.lock" -ErrorAction SilentlyContinue
+   $ProgressPreference = 'SilentlyContinue'   # progress bar makes Invoke-WebRequest very slow
+   Invoke-WebRequest "https://cursor.blob.core.windows.net/remote-releases/$c/vscode-reh-win32-arm64.tar.gz" -OutFile "$env:TEMP\cursor-server.tar.gz"
+   $t = "$env:TEMP\cs"; Remove-Item $t -Recurse -Force -ErrorAction SilentlyContinue; New-Item -ItemType Directory $t | Out-Null
+   tar -xzf "$env:TEMP\cursor-server.tar.gz" -C $t
+   $items = Get-ChildItem $t
+   $src = if ($items.Count -eq 1 -and $items[0].PSIsContainer) { $items[0].FullName } else { $t }
+   Copy-Item "$src\*" $d -Recurse -Force
+   ```
+
+   The last three lines flatten the archive if it wraps everything in a single top-level folder, so the server files sit directly in `$d`.
+3. Reconnect from Cursor. It finds the server for its commit and skips the download.
+
+Repeat whenever Cursor updates and the remote install times out (a new version means a new commit id and a new directory).
+
+**Connection hangs after a VM restart:** stop the `node` processes running from `.cursor-server` and delete the `*.lock` files under it, then reconnect:
+
+```powershell
+Get-Process node -ErrorAction SilentlyContinue |
+  Where-Object { $_.Path -like "$env:USERPROFILE\.cursor-server\*" } | Stop-Process -Force
+Get-ChildItem "$env:USERPROFILE\.cursor-server" -Recurse -Filter *.lock | Remove-Item -Force
+```
+
+### 7.5 GitHub access from the VM
+
+Git runs in the VM, so it needs its own GitHub credentials. Use the GitHub CLI:
+
+```powershell
+gh auth login
+gh auth setup-git   # makes git use gh for github.com (Git Credential Manager can't prompt over SSH)
+git config --global user.name "<name>"
+git config --global user.email "<email>"
+```
+
+Over SSH there is no credential manager to store the token, so `gh` keeps it in plain text in `%APPDATA%\GitHub CLI\hosts.yml`. That is acceptable for this personal VM; do not do this on a shared machine.
 
 ## 8. Firewall and network
 
@@ -185,5 +223,7 @@ MT5 Python `copy_rates_*` / `copy_ticks_*` return epoch seconds that are express
 | `IPC initialize failed` | Terminal not running or not logged in, Algo Trading disabled, or wrong `MT5_PATH` when several terminals are installed. |
 | Cursor Remote-SSH times out / "Could not establish connection" | Raise `remote.SSH.connectTimeout` (7.3). If the server install itself fails, install it manually (7.4). |
 | Cursor connects after an update but hangs on "Installing server" | New commit id; repeat 7.4 for the new commit. |
+| Cursor hangs connecting after a VM restart | Stale server process / lock files; see the end of 7.4. |
+| `git push` fails with "could not read Username" | Run `gh auth setup-git` (7.5). |
 | uv hardlink / "failed to link" errors | Set `UV_LINK_MODE=copy` (script does this). |
 | "running scripts is disabled" / "not digitally signed" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then `Unblock-File` the script if it was downloaded. |
