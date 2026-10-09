@@ -63,6 +63,7 @@ CANONICAL_BARS = pa.schema(
         ("low", pa.float64()),
         ("close", pa.float64()),
         ("tick_count", pa.int64()),
+        ("quote_count", pa.int64()),
         ("spread_open", pa.int32()),
         ("spread_min", pa.int32()),
         ("spread_max", pa.int32()),
@@ -71,9 +72,16 @@ CANONICAL_BARS = pa.schema(
         ("source", pa.string()),
     ]
 )
-"""Bid OHLC bars built deterministically by aurum.data.resample (ticks -> M1 -> M5/M15/H1, or
-broker M1 -> M5/M15/H1 before tick history exists). Spread columns are points; for bars built
-from broker M1 they come from the broker's per-bar ``spread`` field (see DATA_DICTIONARY)."""
+"""Bid OHLC bars built deterministically by aurum.data.resample: ticks -> M1 -> M5/M15/H1, or,
+for days without tick history, broker M1 -> M5/M15/H1.
+
+* ``tick_count``: ticks that changed the bid (MT5 ``tick_volume`` convention, flag bit 2).
+* ``quote_count``: all ticks (bid or ask changed); weight of ``spread_mean``. Null for bars
+  built from broker M1.
+* Spreads are points. Bars built from broker M1 only have ``spread_min`` (the broker's bar
+  ``spread`` field is the minimum spread in the bar, measured in Phase 2); the other spread
+  columns are null there.
+"""
 
 
 def polars_schema(schema: pa.Schema) -> pl.Schema:
