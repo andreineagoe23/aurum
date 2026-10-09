@@ -4,7 +4,7 @@ Units used throughout (see docs/DATA_DICTIONARY.md):
 
 * **price**: quote currency per unit (USD per troy oz for XAUUSD).
 * **points**: multiples of ``SymbolSpec.point`` (0.01 for a 2-digit XAUUSD).
-* **volume**: lots. **money**: account currency (USD).
+* **volume**: lots. **money**: account currency (read from the broker; the demo is GBP).
 * **time**: timezone-aware UTC. Bars are keyed by open time and visible only at close time.
 """
 
@@ -30,8 +30,9 @@ Price = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 Lots = Annotated[float, Field(gt=0, allow_inf_nan=False)]
 Money = Annotated[float, Field(allow_inf_nan=False)]
 SymbolName = Annotated[str, Field(min_length=1, max_length=32)]
-IdempotencyKey = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{8,31}$")]
-"""Fits the 31-char MT5 order comment so it survives a round trip through the broker."""
+IdempotencyKey = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{8,29}$")]
+"""Sent as the MT5 order comment. The MetaTrader5 Python API rejects comments over 29 chars
+(measured in Phase 1); Fusion preserves the comment on orders, positions and deals (ADR-0005)."""
 
 FeatureValue = float | int | bool | str
 

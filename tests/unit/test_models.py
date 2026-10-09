@@ -206,7 +206,7 @@ def test_order_intent_decision_must_match_signal() -> None:
 def test_idempotency_key_derived_from_signal_and_fits_mt5_comment() -> None:
     i = intent()
     assert i.idempotency_key == f"AU{signal().key}"
-    assert len(i.idempotency_key) <= 31
+    assert len(i.idempotency_key) <= 29
     assert intent().idempotency_key == i.idempotency_key  # same signal -> same key
 
 
