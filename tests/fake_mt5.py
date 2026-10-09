@@ -206,7 +206,8 @@ class FakeMT5:
     def copy_ticks_range(self, symbol: str, frm: int, to: int, flags: int) -> np.ndarray | None:
         if not self._ipc_ok():
             return None
-        rows = [t for t in self.tick_rows if frm * 1000 <= t["time_msc"] <= to * 1000]
+        hi = min(to * 1000, self._server_ms())  # a terminal never has ticks from the future
+        rows = [t for t in self.tick_rows if frm * 1000 <= t["time_msc"] <= hi]
         return _structured(rows, TICK_DTYPE)
 
     # ------------------------------------------------------------------ state

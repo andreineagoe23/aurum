@@ -43,7 +43,7 @@ def test_doctor_fails_on_empty_config(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 @pytest.mark.parametrize(
     "args",
-    [["data", "collect"], ["kill"], ["trade", "demo"], ["shadow", "run"]],
+    [["kill"], ["trade", "demo"], ["shadow", "run"]],
 )
 def test_placeholders_exit_2(args: list[str]) -> None:
     assert runner.invoke(app, args).exit_code == 2
@@ -110,3 +110,18 @@ def test_ledger_list_with_trial(tmp_path: Path) -> None:
     result = runner.invoke(app, ["ledger", "list"], env={"COLUMNS": "200"})
     assert result.exit_code == 0, result.output
     assert "zebra_strategy" in result.output
+
+
+def test_data_collect_runs_and_stops(fake_terminal: FakeMT5, tmp_path: Path) -> None:
+    ms = fake_terminal._server_ms()
+    fake_terminal.tick_rows = [
+        {"time_msc": ms - 2000 + i * 100, "bid": 4142.7, "ask": 4142.8} for i in range(10)
+    ]
+    log = tmp_path / "collector.jsonl"
+    result = runner.invoke(app, ["data", "collect", "--max-seconds", "0.2", "--log-file", str(log)])
+    assert result.exit_code == 0, result.output
+    assert "stopped: 10 ticks" in result.output
+    assert list((tmp_path / "raw_ticks" / "mt5_live" / "XAUUSD").rglob("*.parquet"))
+    assert list((tmp_path / "specs" / "XAUUSD").glob("*.json"))  # spec snapshot on connect
+    assert "collector.exit" in log.read_text(encoding="utf-8")
+    assert not (tmp_path / "collector" / "STOP").exists()

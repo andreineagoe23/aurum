@@ -1,6 +1,7 @@
 """``aurum`` command line. Commands for later phases exist as placeholders that exit with code 2."""
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NoReturn
 from zoneinfo import ZoneInfo
 
@@ -72,15 +73,19 @@ def doctor() -> None:
 
 
 # ---------------------------------------------------------------------------- mt5 (Phase 1)
+def _settings_or_exit() -> Settings:
+    try:
+        return load_settings()
+    except ConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+
 def _connected_broker() -> tuple["MT5Broker", Settings]:
     """Load settings, configure JSON logs (stderr) and connect, or exit 1 with the reason."""
     from aurum.adapters.mt5 import MT5Broker
 
-    try:
-        settings = load_settings()
-    except ConfigError as exc:
-        console.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+    settings = _settings_or_exit()
     configure_logging()
     broker = MT5Broker(settings)
     try:
@@ -198,9 +203,34 @@ def data_backfill(
 
 
 @data_app.command("collect")
-def data_collect() -> None:
-    """Append live ticks while MT5 is connected."""
-    _not_yet("data collect", 2)
+def data_collect(
+    max_seconds: Annotated[
+        float | None, typer.Option(help="Stop after this many seconds (default: until stopped)")
+    ] = None,
+    log_file: Annotated[
+        Path | None, typer.Option(help="Append JSON logs to this file instead of stderr")
+    ] = None,
+) -> None:
+    """Append live ticks to raw_ticks/mt5_live until Ctrl+C, SIGTERM or a STOP file.
+
+    Stop a detached collector gracefully by creating <data_dir>/collector/STOP.
+    """
+    from aurum.adapters.mt5 import MT5Broker
+    from aurum.adapters.storage.layout import DataLayout
+    from aurum.apps.collector import run_collector, stop_file_path
+
+    settings = _settings_or_exit()
+    configure_logging(file=log_file)
+    console.print(
+        f"collecting into {settings.data_dir}; stop with Ctrl+C or by creating "
+        f"{stop_file_path(DataLayout(settings.data_dir))}"
+    )
+    stats = run_collector(settings, MT5Broker(settings), max_seconds=max_seconds)
+    console.print(
+        f"stopped: {stats.rows_written} ticks in {stats.chunks_written} chunks, "
+        f"{stats.connects} connects, {stats.disconnects} disconnects, {stats.gaps} gaps, "
+        f"{stats.pauses} pauses"
+    )
 
 
 @data_app.command("qa")

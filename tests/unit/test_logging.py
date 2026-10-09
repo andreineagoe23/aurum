@@ -2,6 +2,7 @@
 
 import json
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import structlog
@@ -45,3 +46,13 @@ def test_end_to_end_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert data["login"] == 123
     assert data["password"] == "***"
     assert data["event"] == "evt"
+
+
+def test_logs_can_go_to_a_file(tmp_path: Path) -> None:
+    path = tmp_path / "logs" / "collector.jsonl"
+    configure_logging(file=path)
+    structlog.get_logger("t").info("collector.heartbeat", password="x", rows=3)
+    record = json.loads(path.read_text(encoding="utf-8").splitlines()[-1])
+    assert record["event"] == "collector.heartbeat"
+    assert record["rows"] == 3
+    assert record["password"] == "***"

@@ -8,6 +8,7 @@ import logging
 import re
 import sys
 from collections.abc import MutableMapping
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -32,8 +33,9 @@ def redact_secrets(
     return event_dict
 
 
-def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
-    """Configure structlog for the process: ISO-8601 UTC timestamps, JSON lines to stderr."""
+def configure_logging(level: str = "INFO", *, json: bool = True, file: Path | None = None) -> None:
+    """Configure structlog for the process: ISO-8601 UTC timestamps, JSON lines to stderr, or
+    appended to ``file`` (for unattended runs such as the collector)."""
     renderer: Any = structlog.processors.JSONRenderer() if json else structlog.dev.ConsoleRenderer()
     structlog.configure(
         processors=[
@@ -45,7 +47,9 @@ def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(level.upper())),
-        logger_factory=structlog.PrintLoggerFactory(file=_CurrentStderr()),  # type: ignore[arg-type]
+        logger_factory=structlog.PrintLoggerFactory(
+            file=_CurrentStderr() if file is None else _AppendFile(file)  # type: ignore[arg-type]
+        ),
         cache_logger_on_first_use=True,
     )
 
@@ -60,3 +64,19 @@ class _CurrentStderr:
 
     def flush(self) -> None:
         sys.stderr.flush()
+
+
+class _AppendFile:
+    """Appends each log line to ``path``, opening and closing it per line: nothing is lost on a
+    hard kill and no handle is held (log volume is low: heartbeats, flushes, events)."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._path = path
+
+    def write(self, text: str) -> int:
+        with self._path.open("a", encoding="utf-8") as f:
+            return f.write(text)
+
+    def flush(self) -> None:
+        pass
