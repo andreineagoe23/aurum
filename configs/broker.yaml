@@ -14,6 +14,10 @@ symbol_search_terms: [XAU, GOLD]
 commission:
   # $4.50 per 1.0 lot round trip == $2.25 per side, charged in USD terms and booked by the
   # broker in the account currency.
+  # MEASURED 2026-10-09 on demo 504691 (USD): position 573971612, 1.00 lot XAUUSD, sell deal
+  # 403504311 (16:10:20 UTC, commission -2.25) and buy deal 403504789 (16:11:30 UTC,
+  # commission -2.25); fee 0, swap 0. Equals the advertised rate. Each deal's commission is
+  # rounded to cents (a 0.01-lot round trip booked -0.02 per side, not -0.0225).
   per_lot_per_side: 2.25
   currency: USD
 
