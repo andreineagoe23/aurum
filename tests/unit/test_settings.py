@@ -74,6 +74,10 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
         ("promotion", {"live_enabled": True}, "signed_off_date"),
         ("broker", {"symbol_candidates": []}, "symbol_candidates"),
         ("broker", {"commission": {"per_lot_per_side": -1}}, "per_lot_per_side"),
+        ("broker", {"account_currency": "pounds"}, "account_currency"),
+        ("broker", {"server_time": {"timezone": "Mars/Olympus"}}, "unknown timezone"),
+        ("broker", {"server_time": {"shift_hours": 30}}, "shift_hours"),
+        ("broker", {"magic_number": -1}, "magic_number"),
     ],
 )
 def test_invalid_values_fail_loudly(

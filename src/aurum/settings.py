@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date, time
 from itertools import pairwise
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Final, Literal, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
@@ -55,10 +55,15 @@ class _Config(BaseModel):
 # ------------------------------------------------------------------------------ broker.yaml
 
 
+CurrencyCode = Annotated[str, Field(pattern=r"^[A-Z]{3}$")]
+AUTO: Final = "auto"
+
+
 class CommissionConfig(_Config):
     per_lot_per_side: float = Field(ge=0)
-    """Account-currency commission per 1.0 lot per side (Fusion Zero: 2.25)."""
-    currency: str = "USD"
+    """Commission per 1.0 lot per side, in ``currency`` (Fusion Zero: USD 2.25). The broker books
+    it in the account currency; converting is the cost model's job (Phase 3)."""
+    currency: CurrencyCode = "USD"
 
     @property
     def per_lot_round_trip(self) -> float:
@@ -70,14 +75,41 @@ class SlippageConfig(_Config):
     points_per_side: float = Field(ge=0)
 
 
+class ServerTimeConfig(_Config):
+    """How the MT5 server clock relates to real time (ADR-0004).
+
+    Server wall clock = wall clock of ``timezone`` + ``shift_hours``. Fusion Markets: New York + 7
+    (UTC+2 in US winter time, UTC+3 in US summer time; server midnight = 17:00 New York).
+    """
+
+    timezone: str = "America/New_York"
+    shift_hours: int = Field(default=7, ge=-12, le=14)
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz_exists(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown timezone {value!r}") from exc
+        return value
+
+
 class BrokerConfig(_Config):
     name: str
     account_type: str
-    account_currency: str = "USD"
+    account_currency: CurrencyCode | Literal["auto"] = AUTO
+    """``auto``: use whatever the connected account reports. A code (e.g. ``GBP``) is an
+    expectation: connecting to an account in another currency is an error."""
     symbol_candidates: list[str] = Field(min_length=1)
     symbol_search_terms: list[str] = Field(min_length=1)
     commission: CommissionConfig
     slippage: SlippageConfig
+    server_time: ServerTimeConfig = ServerTimeConfig()
+    magic_number: int = Field(default=0, ge=0, le=2**63 - 1)
+    """MT5 ``magic`` stamped on every Aurum order, so reconciliation can tell ours apart."""
+    max_deviation_points: int = Field(default=50, ge=0)
+    """Largest price deviation (points) accepted on a market order fill (MT5 ``deviation``)."""
 
 
 # ------------------------------------------------------------------------------ sessions.yaml

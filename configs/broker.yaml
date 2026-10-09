@@ -2,7 +2,9 @@
 # Live gating lives in promotion.yaml + environment, never here.
 name: fusion_markets_zero
 account_type: zero
-account_currency: USD
+# auto = take the currency the connected account reports (the demo is GBP).
+# Set a code (e.g. GBP) to make connecting to an account in another currency an error.
+account_currency: auto
 
 # The broker's exact gold symbol is discovered at runtime (`aurum mt5 symbols --find gold`).
 # Candidates are tried in order; the first one the terminal knows wins.
@@ -10,7 +12,8 @@ symbol_candidates: [XAUUSD, XAUUSD., XAUUSD.r, XAUUSD+, GOLD]
 symbol_search_terms: [XAU, GOLD]
 
 commission:
-  # $4.50 per 1.0 lot round trip == $2.25 per side.
+  # $4.50 per 1.0 lot round trip == $2.25 per side, charged in USD terms and booked by the
+  # broker in the account currency.
   per_lot_per_side: 2.25
   currency: USD
 
@@ -18,3 +21,13 @@ commission:
 slippage:
   model: fixed_points
   points_per_side: 5
+
+# MT5 server clock = New York wall clock + 7h (measured in Phase 1, ADR-0004).
+server_time:
+  timezone: America/New_York
+  shift_hours: 7
+
+# Stamped on every Aurum order (MT5 `magic`) so reconciliation can tell our orders apart.
+magic_number: 7020261
+# Market orders: reject the fill if price moved more than this many points (50 = $0.50).
+max_deviation_points: 50
