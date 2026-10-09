@@ -10,3 +10,8 @@ pre_session_minutes: 30
 no_new_entries_after: "19:30"
 force_flat_at: "20:00"
 trading_days: [MON, TUE, WED, THU, FRI]
+# Exposure must be flat this many minutes before the market closes (the daily break at 16:59
+# New York, or an early close from data.yaml). Effective cutoff each day:
+# min(force_flat_at, market close - buffer). Matters on US-holiday early closes (e.g. 13:01 New
+# York = 18:01 London -> flat by 17:46 London).
+market_close_buffer_minutes: 15

@@ -140,6 +140,10 @@ class SessionsConfig(_Config):
     no_new_entries_after: ClockTime
     force_flat_at: ClockTime
     trading_days: list[Weekday] = Field(min_length=1)
+    market_close_buffer_minutes: int = Field(default=15, ge=0, le=120)
+    """Minutes before the market's close (data.yaml ``market``: the daily break or an early close)
+    by which exposure must be flat. The effective cutoff is
+    ``min(force_flat_at, market close - buffer)``; see ``aurum.sessions.calendar``."""
 
     @field_validator("timezone")
     @classmethod

@@ -46,11 +46,17 @@ class DaySchedule:
     sessions: tuple[SessionWindowUtc, ...]
     no_new_entries_after: datetime
     force_flat_at: datetime
+    """Effective cutoff: exposure must be flat from here on."""
     day_end: datetime
+    market_close: datetime | None = None
+    """UTC close of the market on this trading day, when known (``TradingCalendar``)."""
+    early_close: bool = False
+    """True on a listed early-close date (data.yaml ``market.early_closes``)."""
 
     @property
     def first_session_start(self) -> datetime:
-        return self.sessions[0].start
+        """Start of the first entry window (``no_new_entries_after`` if none is left)."""
+        return self.sessions[0].start if self.sessions else self.no_new_entries_after
 
 
 class SessionClock:
