@@ -328,12 +328,36 @@ class DataConfig(_Config):
     qa: QaConfig
 
 
+# ------------------------------------------------------------------------------ backtest.yaml
+
+
+class BacktestConfig(_Config):
+    """Simulator settings (Phase 3). Costs (commission, slippage) come from broker.yaml."""
+
+    initial_balance: float = Field(gt=0)
+    """Starting balance in account currency."""
+    leverage: int = Field(ge=1, le=3000)
+    """Account leverage for the margin check only."""
+    latency_ms: int = Field(ge=0, le=10_000)
+    """Decision -> order arrival at the broker. Resolved on ticks; below one minute it cannot
+    be resolved on bar-only days (fills use the next M1 open)."""
+    max_quote_wait_seconds: float = Field(gt=0, le=3600)
+    """A market order or close with no quote within this is rejected (market closed, gap)."""
+    bar_spread_extra_points: int = Field(ge=0, le=100)
+    """Bar-only days: spread = the bar's minimum spread + this (points)."""
+    fixed_volume_lots: float = Field(gt=0, le=100)
+    """Volume used by the Phase 3 risk stand-in (``FixedVolumeRisk``), until Phase 4 sizing."""
+    warmup_days: int = Field(ge=0, le=60)
+    """Calendar days of bars loaded before ``--from`` so strategies have history."""
+
+
 # ------------------------------------------------------------------------------ strategies/
 
 
 class StrategyConfig(_Config):
     name: str = Field(pattern=r"^[a-z0-9_]+$")
-    family: Literal["trend_pullback", "opening_range_breakout", "vwap_reversion"]
+    family: Literal["trend_pullback", "opening_range_breakout", "vwap_reversion", "reference"]
+    """``reference`` is the Phase 3 simulator check, not a research strategy."""
     enabled: bool = False
     variants: list[Literal["m15", "m5"]] = Field(min_length=1)
     sessions: list[str] = Field(min_length=1)
@@ -357,6 +381,7 @@ class AppConfig(_Config):
     risk: RiskConfig
     promotion: PromotionConfig
     data: DataConfig
+    backtest: BacktestConfig
     strategies: dict[str, StrategyConfig]
 
     @model_validator(mode="after")
@@ -383,7 +408,7 @@ def load_config(config_dir: Path) -> AppConfig:
     """Load and validate every YAML in ``config_dir``. Raises ``ConfigError`` on any problem."""
     raw: dict[str, Any] = {
         name: _read_yaml(config_dir / f"{name}.yaml")
-        for name in ("broker", "sessions", "risk", "promotion", "data")
+        for name in ("broker", "sessions", "risk", "promotion", "data", "backtest")
     }
     strategies_dir = config_dir / "strategies"
     raw["strategies"] = (
@@ -408,6 +433,7 @@ class EnvSettings(BaseSettings):
     aurum_mode: Mode = Mode.BACKTEST
     aurum_data_dir: Path | None = None
     aurum_config_dir: Path | None = None
+    aurum_runs_dir: Path | None = None
     aurum_live_ack: str | None = None
     mt5_login: int | None = None
     mt5_password: SecretStr | None = None
@@ -461,6 +487,11 @@ class Settings:
     @property
     def mode(self) -> Mode:
         return self.env.aurum_mode
+
+    @property
+    def runs_dir(self) -> Path:
+        """Where backtest runs are written: ``AURUM_RUNS_DIR`` or <project>/reports/runs."""
+        return self.env.aurum_runs_dir or self.project_root / "reports" / "runs"
 
 
 def load_settings(project_root: Path | None = None, *, env_file: Path | None = None) -> Settings:

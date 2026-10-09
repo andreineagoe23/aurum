@@ -49,7 +49,11 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
         "trend_pullback",
         "opening_range_breakout",
         "vwap_reversion",
+        "reference_fixed_time",
     }
+    assert app_config.strategies["reference_fixed_time"].family == "reference"
+    assert app_config.backtest.bar_spread_extra_points == 2
+    assert app_config.backtest.latency_ms == 200
     assert not any(s.enabled for s in app_config.strategies.values())
 
 

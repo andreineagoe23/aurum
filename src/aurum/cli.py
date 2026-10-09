@@ -23,6 +23,7 @@ from aurum.settings import Settings, load_settings
 
 if TYPE_CHECKING:
     from aurum.adapters.mt5 import MT5Broker
+    from aurum.adapters.storage.layout import RunLayout
     from aurum.data.qa import Gap
 
 app = typer.Typer(
@@ -619,15 +620,176 @@ def data_hashes(
 
 
 # ---------------------------------------------------------------------------- research
+def _runs(settings: Settings) -> "RunLayout":
+    from aurum.adapters.storage.layout import RunLayout
+
+    return RunLayout(settings.runs_dir)
+
+
+_SUMMARY_ROWS = (
+    ("trades", "trades"),
+    ("long / short", ("long", "short")),
+    ("win rate", "win_rate"),
+    ("net P&L", "net_pnl"),
+    ("gross P&L (mid to mid)", "gross_pnl"),
+    ("spread cost", "spread_cost"),
+    ("slippage cost", "slippage_cost"),
+    ("commission", "commission"),
+    ("expectancy / trade", "expectancy"),
+    ("profit factor", "profit_factor"),
+    ("max drawdown", ("max_drawdown", "max_drawdown_pct")),
+    ("avg holding (min)", "avg_holding_minutes"),
+    ("trades on ticks / bars", ("trades_tick_mode", "trades_bar_mode")),
+    ("worst-case intra-bar trades", ("worst_case_trades", "worst_case_share")),
+    ("  stop+target same bar", "intrabar_sl_tp_same_bar"),
+    ("  entry+exit same bar", "intrabar_entry_bar"),
+    (
+        "exits stop/target/inval/timeout/flat/eod",
+        (
+            "exit_stop",
+            "exit_target",
+            "exit_invalidation",
+            "exit_timeout",
+            "exit_force_flat",
+            "exit_end_of_data",
+        ),
+    ),
+    ("tick days / bar days", ("tick_days", "bar_days")),
+    ("open at end", "open_at_end"),
+)
+
+
+def _print_summary(title: str, summary: dict[str, object]) -> None:
+    table = Table(title=title, show_header=False)
+    for label, keys in _SUMMARY_ROWS:
+        names = (keys,) if isinstance(keys, str) else keys
+        table.add_row(label, " / ".join(str(summary.get(k)) for k in names))
+    console.print(table)
+
+
 @backtest_app.command("run")
 def backtest_run(
     strategy: str,
-    variant: Annotated[str, typer.Option(help="m15 or m5")] = "m15",
-    from_: Annotated[str | None, typer.Option("--from")] = None,
-    to: Annotated[str | None, typer.Option("--to")] = None,
+    from_: Annotated[str, typer.Option("--from", help="First trading date YYYY-MM-DD")],
+    to: Annotated[str, typer.Option("--to", help="Last trading date YYYY-MM-DD (inclusive)")],
+    variant: Annotated[str, typer.Option(help="m15 or m5 (decision timeframe)")] = "m15",
+    latency_ms: Annotated[
+        int | None, typer.Option(help="Override backtest.latency_ms (e.g. 0 for tester parity)")
+    ] = None,
+    slippage_points: Annotated[
+        float | None, typer.Option(help="Override broker.slippage.points_per_side")
+    ] = None,
+    notes: Annotated[str, typer.Option(help="Free text stored with the run and the trial")] = "",
 ) -> None:
-    """Run one backtest (recorded in the trial ledger)."""
-    _not_yet("backtest run", 3)
+    """Run one backtest; writes reports/runs/<run_id>/ and records a trial in the ledger."""
+    from aurum.backtest.pipeline import RunRequest, execute
+
+    settings = _settings_or_exit()
+    request = RunRequest(
+        strategy=strategy,
+        variant=variant,
+        first=date.fromisoformat(from_),
+        last=date.fromisoformat(to),
+        latency_ms=latency_ms,
+        slippage_points=slippage_points,
+        notes=notes,
+    )
+    try:
+        outcome = execute(settings, request, runs=_runs(settings), clock=SystemClock())
+    except (AurumError, FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    _print_summary(f"backtest {outcome.run_id}", outcome.summary)
+    console.print(f"run: {outcome.run_dir}")
+    console.print(f"trial: {outcome.trial_id}")
+    console.print(f"trades sha256: {outcome.manifest.get('outputs', {}).get('trades', '?')}")
+
+
+@backtest_app.command("report")
+def backtest_report(
+    run_id: str,
+    trades: Annotated[int, typer.Option(help="How many trades to list (last ones)")] = 20,
+) -> None:
+    """Summary, provenance and recent trades of a stored run; re-checks the output hashes."""
+    from aurum.backtest.storage import read_manifest, read_summary, read_trades, verify_outputs
+
+    settings = _settings_or_exit()
+    runs = _runs(settings)
+    try:
+        manifest = read_manifest(runs, run_id)
+    except FileNotFoundError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    _print_summary(f"backtest {run_id}", read_summary(runs, run_id))
+    info = Table(title="provenance", show_header=False)
+    for key in (
+        "strategy",
+        "variant",
+        "first",
+        "last",
+        "code_version",
+        "config_hash",
+        "data_hash",
+        "data_files",
+        "spec_snapshot",
+        "trial_id",
+    ):
+        info.add_row(key, str(manifest.get(key)))
+    info.add_row("params", json.dumps(manifest.get("params"), sort_keys=True))
+    checks = verify_outputs(runs, run_id)
+    info.add_row("outputs unchanged", ", ".join(f"{k}: {v}" for k, v in checks.items()))
+    console.print(info)
+    df = read_trades(runs, run_id).tail(trades)
+    table = Table(title=f"last {df.height} trades (UTC)")
+    cols = (
+        "trade_no",
+        "side",
+        "entry_time",
+        "entry_price",
+        "exit_time",
+        "exit_price",
+        "exit_reason",
+        "net_pnl",
+        "entry_mode",
+        "intrabar_rule",
+    )
+    for c in cols:
+        table.add_column(c)
+    for row in df.iter_rows(named=True):
+        table.add_row(
+            *(
+                f"{row[c]:%Y-%m-%d %H:%M:%S}" if isinstance(row[c], datetime) else str(row[c])
+                for c in cols
+            )
+        )
+    console.print(table)
+    if not all(checks.values()):
+        raise typer.Exit(1)
+
+
+@backtest_app.command("compare")
+def backtest_compare(run_a: str, run_b: str) -> None:
+    """Exit 0 only if two runs produced byte-identical trades, equity and journal files."""
+    from aurum.backtest.storage import OUTPUTS, read_manifest
+
+    settings = _settings_or_exit()
+    runs = _runs(settings)
+    a, b = read_manifest(runs, run_a), read_manifest(runs, run_b)
+    table = Table(title=f"{run_a} vs {run_b}")
+    for col in ("output", "identical", run_a, run_b):
+        table.add_column(col)
+    same = True
+    for name in OUTPUTS:
+        ha, hb = a["outputs"][name], b["outputs"][name]
+        same &= ha == hb
+        table.add_row(name, str(ha == hb), ha[:16], hb[:16])
+    for key in ("code_version", "config_hash", "data_hash"):
+        table.add_row(
+            key, str(a.get(key) == b.get(key)), str(a.get(key))[:16], str(b.get(key))[:16]
+        )
+    console.print(table)
+    if not same:
+        raise typer.Exit(1)
 
 
 @validate_app.command("walkforward")
@@ -646,7 +808,9 @@ def ledger_list(
     except ConfigError as exc:
         console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    path = settings.data_dir / "ledger" / "trials.sqlite"
+    from aurum.adapters.storage.layout import ledger_path
+
+    path = ledger_path(settings.data_dir)
     if not path.exists():
         console.print(f"No ledger yet at {path}.")
         return

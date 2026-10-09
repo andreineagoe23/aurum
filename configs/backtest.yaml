@@ -1,0 +1,20 @@
+# Phase 3 event-driven simulator (aurum.backtest). Costs come from broker.yaml: commission
+# (USD per lot per side) and slippage (fixed points per side, recalibrated in Phase 8).
+
+initial_balance: 10000.0     # account currency (USD)
+leverage: 500                # margin check only; Fusion demo accounts measured 1:500 (Phase 1)
+latency_ms: 200              # decision -> order arrival; the fill is the next quote after it
+max_quote_wait_seconds: 60   # no quote within this after arrival -> order/close rejected
+
+# Bar-only days (tick fidelity not exact, ADR-0007): the broker's M1 bar spread is the bar's
+# MINIMUM. Spread assumed for fills = minimum + this. Measured on exact days 2026-06-26..10-08
+# inside the London sessions: the spread at an M1 bar's first quote exceeds the bar's minimum
+# by 2.03 points on average (median 1, p90 5). 2 = the unbiased estimate (Phase 6 stresses
+# spreads x1.5 / x2 on top).
+bar_spread_extra_points: 2
+
+# Phase 3 risk stand-in (aurum.risk.fixed.FixedVolumeRisk): every approved signal trades this
+# many lots. Replaced by equity-based sizing in Phase 4.
+fixed_volume_lots: 0.10
+
+warmup_days: 10              # calendar days of bars loaded before --from

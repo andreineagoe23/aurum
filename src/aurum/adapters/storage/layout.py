@@ -13,6 +13,10 @@ except live tick chunks, which are many small immutable files per UTC date.
     quality_reports/<name>/<...>.json
     collector/<symbol>/heartbeat.json, events.jsonl
     specs/<symbol>/<UTC stamp>.json
+    ledger/trials.sqlite                                trial ledger (every backtest)
+
+Backtest runs live outside the data dir, under the project's ``reports/runs/<run_id>/``
+(``RunLayout``): manifest.json, summary.json, trades.parquet, equity.parquet, journal.parquet.
 """
 
 from dataclasses import dataclass
@@ -105,3 +109,38 @@ def days_in(directory: Path) -> list[date]:
         except ValueError:
             continue
     return sorted(out)
+
+
+@dataclass(frozen=True)
+class RunLayout:
+    """Files of backtest runs under ``root`` (default: <project>/reports/runs)."""
+
+    root: Path
+
+    def run_dir(self, run_id: str) -> Path:
+        return self.root / run_id
+
+    def manifest(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "manifest.json"
+
+    def summary(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "summary.json"
+
+    def trades(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "trades.parquet"
+
+    def equity(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "equity.parquet"
+
+    def journal(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "journal.parquet"
+
+    def runs(self) -> list[str]:
+        """Run ids with a manifest, oldest first (ids start with a UTC stamp)."""
+        if not self.root.is_dir():
+            return []
+        return sorted(p.parent.name for p in self.root.glob("*/manifest.json"))
+
+
+def ledger_path(data_dir: Path) -> Path:
+    return data_dir / "ledger" / "trials.sqlite"
