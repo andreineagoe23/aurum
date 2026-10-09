@@ -1,6 +1,7 @@
 # ADR-0008: Dukascopy XAUUSD ticks as a separate, labelled research source
 
-- **Status:** **Proposed.** Not implemented; waiting for the owner's decision.
+- **Status:** **Accepted (deferred).** Approved in principle by the owner on 2026-10-09; not
+  implemented. See "Decision" for the conditions.
 - **Date:** 2026-10-09
 
 ## Context
@@ -46,6 +47,14 @@ spreads are **not** Fusion's.
   intra-bar assumptions (MASTER_PROMPT Phase 3: stop first, flagged).
 - **Another broker's MT5 demo ticks:** same depth limits as Fusion are likely.
 
-## Decision needed from the owner
+## Decision (owner, 2026-10-09)
 
-Approve, change or reject this proposal. Nothing is implemented until then.
+Approved in principle, **deferred**:
+
+1. Phase 3 is built on Fusion data only, with the worst-case intra-bar rule (stop first) on days
+   without `exact` ticks. Every trade that depends on that rule is flagged, and the Phase 3
+   report states their share.
+2. If that share is material, Dukascopy ingestion becomes **Phase 3b**, and only if both hold:
+   a. Dukascopy's terms are confirmed to allow personal research use;
+   b. the validation in proposal item 4 passes against Fusion `exact` days.
+3. Until then nothing in this ADR is implemented and no Dukascopy data is downloaded.
