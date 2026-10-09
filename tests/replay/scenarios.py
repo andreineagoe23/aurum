@@ -91,6 +91,7 @@ GAP_BARS = Scenario(
     name="gap_through_stop_bars",
     build=bars_only(
         [
+            ("07:59", 2000.00, 2000.10, 1999.90, 2000.00, 10),  # quote seen by the 08:00 risk check
             ("08:00", 2000.00, 2000.40, 1999.70, 2000.20, 10),  # fill at open: ask 2000.12 + 0.05
             ("08:01", 2000.20, 2000.30, 1996.00, 1996.50, 10),  # low 1996.00 > stop 1995.00
             ("08:02", 1993.80, 1994.50, 1993.00, 1994.20, 10),  # opens below the stop
@@ -152,6 +153,7 @@ SAME_BAR_NO_TICKS = Scenario(
     name="sl_tp_same_bar_without_ticks",
     build=bars_only(
         [
+            ("07:59", 2000.00, 2000.10, 1999.90, 2000.00, 10),
             ("08:00", 2000.00, 2000.50, 1999.80, 2000.20, 10),
             ("08:01", 2000.20, 2003.50, 1996.50, 2000.00, 10),  # reaches 2003.00 and 1997.00
         ]
@@ -268,14 +270,11 @@ DAILY_BREAK = Scenario(
     ],
 )
 
+
 # ---------------------------------------------------------------------------- rejected order
-REJECT_ONCE: dict[str, int] = {}
-
-
 def _reject_first(intent: Any, q: Any) -> str | None:
-    """Simulated broker requote on the first order of each run only."""
-    seen = REJECT_ONCE.setdefault(intent.idempotency_key, len(REJECT_ONCE))
-    return "requote" if seen == 0 else None
+    """Simulated broker requote of the 08:00 order only (stateless, so reruns match)."""
+    return "requote" if q.time < at("08:05") else None
 
 
 REJECTED_ORDER = Scenario(
