@@ -74,6 +74,8 @@ class ExecutionStatus(StrEnum):
     CLOSED = "CLOSED"
     CANCELLED = "CANCELLED"
     REJECTED = "REJECTED"
+    UNKNOWN = "UNKNOWN"
+    """The connection failed during the request: the broker's state decides (reconciliation)."""
 
 
 class DealEntry(StrEnum):
@@ -107,5 +109,7 @@ class ExitReason(StrEnum):
     """The signal's ``max_hold`` elapsed."""
     FORCE_FLAT = "FORCE_FLAT"
     """Session cutoff (or market close minus buffer) reached with the position open."""
+    KILL_SWITCH = "KILL_SWITCH"
+    """The kill switch was engaged (``aurum kill`` or a KILL file in the data directory)."""
     END_OF_DATA = "END_OF_DATA"
     """A backtest ended with the position still open (should not happen with force-flat)."""
