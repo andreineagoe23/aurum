@@ -232,6 +232,11 @@ def _check_timezone(value: str) -> str:
     return value
 
 
+class EarlyClose(_Config):
+    close: ClockTime
+    reason: str = Field(min_length=1)
+
+
 class MarketHoursConfig(_Config):
     """When the instrument trades, in ``timezone`` wall clock (measured, see data.yaml).
 
@@ -244,7 +249,7 @@ class MarketHoursConfig(_Config):
     close: ClockTime
     open_grace_minutes: int = Field(default=2, ge=0, le=30)
     closed_dates: dict[date, str] = Field(default_factory=dict)
-    early_closes: dict[date, ClockTime] = Field(default_factory=dict)
+    early_closes: dict[date, EarlyClose] = Field(default_factory=dict)
 
     _tz = field_validator("timezone")(_check_timezone)
 
@@ -255,9 +260,9 @@ class MarketHoursConfig(_Config):
         for d in (*self.closed_dates, *self.early_closes):
             if d.weekday() >= 5:
                 raise ValueError(f"{d} is a weekend: only weekday trading dates can be listed")
-        for d, t in self.early_closes.items():
-            if t >= self.close:
-                raise ValueError(f"early close {t} on {d} is not before the normal close")
+        for d, early in self.early_closes.items():
+            if early.close >= self.close:
+                raise ValueError(f"early close {early.close} on {d} is not before the normal close")
             if d in self.closed_dates:
                 raise ValueError(f"{d} is both closed and an early close")
         return self

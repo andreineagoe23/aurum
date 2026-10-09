@@ -92,7 +92,10 @@ def test_trading_dates(hours: MarketHours) -> None:
 
 def test_early_close(app_config: AppConfig) -> None:
     cfg = MarketHoursConfig.model_validate(
-        {**app_config.data.market.model_dump(), "early_closes": {"2026-11-27": "13:15"}}
+        {
+            **app_config.data.market.model_dump(),
+            "early_closes": {"2026-11-27": {"close": "13:15", "reason": "Thanksgiving Friday"}},
+        }
     )
     s = MarketHours(cfg).session(date(2026, 11, 27))
     assert s is not None
@@ -104,9 +107,15 @@ def test_early_close(app_config: AppConfig) -> None:
     [
         ({"close": "18:30"}, "close must be before open"),
         ({"closed_dates": {"2026-04-04": "Saturday"}}, "weekend"),
-        ({"early_closes": {"2026-04-14": "17:30"}}, "not before the normal close"),
         (
-            {"closed_dates": {"2026-04-14": "x"}, "early_closes": {"2026-04-14": "12:00"}},
+            {"early_closes": {"2026-04-14": {"close": "17:30", "reason": "x"}}},
+            "not before the normal close",
+        ),
+        (
+            {
+                "closed_dates": {"2026-04-14": "x"},
+                "early_closes": {"2026-04-14": {"close": "12:00", "reason": "x"}},
+            },
             "both closed and an early close",
         ),
         ({"timezone": "Mars/Olympus"}, "unknown timezone"),

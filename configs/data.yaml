@@ -16,7 +16,7 @@ market:
   closed_dates:
     2026-04-03: Good Friday
     2026-07-03: Independence Day (observed)
-  # Trading dates that end early: New York close time instead of `close`.
+  # Trading dates that end early: {close: "HH:MM" New York, reason: ...}.
   early_closes: {}
 
 backfill:

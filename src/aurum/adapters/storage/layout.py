@@ -8,6 +8,7 @@ except live tick chunks, which are many small immutable files per UTC date.
     raw_broker_bars/mt5/<symbol>/<tf>/<date>.parquet
     normalized_ticks/<symbol>/<date>.parquet
     canonical_bars/<tf>/<symbol>/<date>.parquet
+    canonical_bars/days/<symbol>.parquet                one row per day: source, tick fidelity
     features/                                           (reserved for Phase 5)
     quality_reports/<name>/<...>.json
     collector/<symbol>/heartbeat.json, events.jsonl
@@ -78,6 +79,9 @@ class DataLayout:
 
     def canonical_bars(self, symbol: str, timeframe: Timeframe, day: date) -> Path:
         return self.canonical_bars_dir(symbol, timeframe) / f"{day_name(day)}.parquet"
+
+    def day_manifest(self, symbol: str) -> Path:
+        return self.root / "canonical_bars" / "days" / f"{symbol}.parquet"
 
     def quality_reports(self, name: str) -> Path:
         return self.root / "quality_reports" / name

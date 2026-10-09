@@ -36,7 +36,8 @@ class MarketHours:
         """The session of ``trading_date``, or None on weekends and closed dates."""
         if trading_date.weekday() >= 5 or trading_date in self.cfg.closed_dates:
             return None
-        close = self.cfg.early_closes.get(trading_date, self.cfg.close)
+        early = self.cfg.early_closes.get(trading_date)
+        close = early.close if early is not None else self.cfg.close
         return MarketSession(
             trading_date=trading_date,
             open=self._utc(trading_date - timedelta(days=1), self.cfg.open),

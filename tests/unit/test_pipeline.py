@@ -71,6 +71,7 @@ def test_tick_day_builds_normalized_and_canonical_and_matches_broker(layout: Dat
         )
     result = build(layout)
     assert result.source == "mt5_history"
+    assert result.tick_fidelity == "exact"
     assert result.ticks is not None
     assert result.ticks.kept == 600
     assert read_parquet(layout.normalized_ticks("XAUUSD", DAY)).height == 600
@@ -147,3 +148,46 @@ def test_compare_reports_disagreements() -> None:
     assert c.ohlc_mismatch == 1
     assert c.max_diff_points["high"] == 25
     assert c.worst[0]["open_time"] == T.isoformat()
+
+
+def test_ticks_that_do_not_reproduce_broker_m1_yield_to_it(layout: DataLayout) -> None:
+    ticks = raw_ticks()
+    full_m1 = broker_bars_from(ticks, Timeframe.M1)
+    thinned = ticks.filter(pl.col("time") < T + timedelta(minutes=8))  # last minute missing
+    write_parquet(thinned, layout.raw_ticks("XAUUSD", DAY), RAW_TICKS, overwrite=False)
+    write_parquet(full_m1, layout.raw_bars("XAUUSD", Timeframe.M1, DAY), RAW_BARS, overwrite=False)
+    [result] = build_range(layout, "XAUUSD", [DAY], point=0.01, outlier_factor=5)
+    assert result.tick_fidelity == "incomplete"
+    assert result.source == BROKER_M1_SOURCE
+    assert result.tick_vs_broker is not None
+    assert result.tick_vs_broker.only_broker == 1
+    assert result.comparisons["M1"].ohlc_mismatch == 0  # canonical now equals the broker
+    assert read_parquet(layout.normalized_ticks("XAUUSD", DAY)).height == thinned.height
+    manifest = read_parquet(layout.day_manifest("XAUUSD"))
+    row = manifest.row(0, named=True)
+    assert row["day"] == DAY
+    assert (row["m1_source"], row["tick_fidelity"], row["broker_only_minutes"]) == (
+        BROKER_M1_SOURCE,
+        "incomplete",
+        1,
+    )
+    summary = summarize_build([result])
+    assert summary["tick_fidelity"]["incomplete"]["days"] == 1
+
+
+def test_manifest_merges_partial_rebuilds(layout: DataLayout) -> None:
+    other = date(2026, 9, 17)
+    write_parquet(raw_ticks(), layout.raw_ticks("XAUUSD", DAY), RAW_TICKS, overwrite=False)
+    write_parquet(
+        raw_ticks(start=T + timedelta(days=1)),
+        layout.raw_ticks("XAUUSD", other),
+        RAW_TICKS,
+        overwrite=False,
+    )
+    build_range(layout, "XAUUSD", [DAY, other], point=0.01, outlier_factor=5)
+    before = sha256_file(layout.day_manifest("XAUUSD"))
+    build_range(layout, "XAUUSD", [other], point=0.01, outlier_factor=5)
+    manifest = read_parquet(layout.day_manifest("XAUUSD"))
+    assert manifest["day"].to_list() == [DAY, other]
+    assert manifest["tick_fidelity"].to_list() == ["unverified", "unverified"]
+    assert sha256_file(layout.day_manifest("XAUUSD")) == before

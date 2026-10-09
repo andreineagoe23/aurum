@@ -351,6 +351,10 @@ def data_resample(
             str(max(row["max_diff_points"].values())),
         )
     console.print(table)
+    for name, info in summary["tick_fidelity"].items():
+        console.print(
+            f"tick fidelity {name}: {info['days']} days ({info['first']} .. {info['last']})"
+        )
     report = write_report(layout, "resample", {"symbol": symbol, **summary})
     console.print(f"report: {report}")
 

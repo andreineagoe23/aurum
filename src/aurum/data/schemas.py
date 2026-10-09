@@ -83,6 +83,21 @@ for days without tick history, broker M1 -> M5/M15/H1.
   columns are null there.
 """
 
+DAY_SOURCES = pa.schema(
+    [
+        ("day", pa.date32()),
+        ("m1_source", pa.string()),
+        ("tick_source", pa.string()),
+        ("tick_rows", pa.int64()),
+        ("tick_fidelity", pa.string()),
+        ("tick_m1_mismatch", pa.int64()),
+        ("broker_only_minutes", pa.int64()),
+        ("tick_only_minutes", pa.int64()),
+    ]
+)
+"""One row per UTC day built by aurum.data.pipeline: where its canonical bars came from and
+whether its stored ticks reproduce the broker's M1 (``tick_fidelity``, ADR-0006)."""
+
 
 def polars_schema(schema: pa.Schema) -> pl.Schema:
     """The polars equivalent of an Arrow schema above."""
