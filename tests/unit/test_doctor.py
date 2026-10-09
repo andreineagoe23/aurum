@@ -1,5 +1,6 @@
 """Unit tests for doctor checks."""
 
+import sysconfig
 from pathlib import Path
 
 from aurum.monitoring.doctor import (
@@ -12,9 +13,14 @@ from aurum.monitoring.doctor import (
 
 
 def test_architecture() -> None:
-    assert check_architecture(os_name="win32", machine="ARM64").status is Status.FAIL
-    assert check_architecture(os_name="win32", machine="AMD64").status is Status.OK
-    assert check_architecture(os_name="darwin", machine="arm64").status is Status.OK
+    assert check_architecture(os_name="win32", plat="win-arm64").status is Status.FAIL
+    assert check_architecture(os_name="win32", plat="win32").status is Status.FAIL
+    assert check_architecture(os_name="win32", plat="win-amd64").status is Status.OK
+    assert check_architecture(os_name="darwin", plat="macosx-11.0-arm64").status is Status.OK
+
+
+def test_architecture_defaults_to_interpreter_build_platform() -> None:
+    assert check_architecture().detail.startswith(sysconfig.get_platform())
 
 
 def test_mt5_package_skipped_off_windows() -> None:

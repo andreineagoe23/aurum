@@ -76,13 +76,16 @@ $VenvPython = Join-Path $VenvPath 'Scripts\python.exe'
 if (-not (Test-Path $VenvPython)) {
     throw "Expected venv interpreter not found at $VenvPython."
 }
-& $VenvPython -c "import platform,sys; print(platform.machine(), sys.version)"
+& $VenvPython -c "import sys,sysconfig; print(sysconfig.get_platform(), sys.version)"
 Assert-Native 'python version check'
-$Machine = (& $VenvPython -c "import platform; print(platform.machine())").Trim()
-if ($Machine -ne 'AMD64') {
-    throw "Python reports '$Machine' but AMD64 (x64) is required for the MetaTrader5 wheel. Remove $VenvPath and re-run so uv picks $PyRequest."
+# sysconfig.get_platform() reports the interpreter build; platform.machine() reports ARM64
+# on Windows ARM even for emulated x64 Python, so it cannot be used here.
+$Plat = (& $VenvPython -c "import sysconfig; print(sysconfig.get_platform())").Trim()
+Assert-Native 'python platform check'
+if ($Plat -ne 'win-amd64') {
+    throw "Python platform is '$Plat' but win-amd64 (x64) is required for the MetaTrader5 wheel. Remove $VenvPath and re-run so uv picks $PyRequest."
 }
-Write-Host "  OK: $Machine"
+Write-Host "  OK: $Plat"
 
 Write-Step 'Verify MetaTrader5 import'
 & $VenvPython -c "import MetaTrader5; print(MetaTrader5.__version__)"

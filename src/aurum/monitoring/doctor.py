@@ -2,6 +2,7 @@
 
 import platform
 import sys
+import sysconfig
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
@@ -36,12 +37,17 @@ def check_python() -> CheckResult:
     return CheckResult("python", Status.WARN, f"{version} (project targets 3.12)")
 
 
-def check_architecture(os_name: str = sys.platform, machine: str | None = None) -> CheckResult:
-    machine = machine or platform.machine()
-    detail = f"{machine}, {64 if sys.maxsize > 2**32 else 32}-bit interpreter"
-    if os_name == "win32" and machine.upper() not in ("AMD64", "X86_64"):
+def check_architecture(os_name: str = sys.platform, plat: str | None = None) -> CheckResult:
+    """MetaTrader5 ships ``win_amd64`` wheels only, so Windows needs an x64 interpreter.
+
+    Uses ``sysconfig.get_platform()`` (what the interpreter was built for), not
+    ``platform.machine()``: on Windows ARM the latter reports ``ARM64`` even for emulated x64.
+    """
+    plat = plat or sysconfig.get_platform()
+    detail = f"{plat}, {64 if sys.maxsize > 2**32 else 32}-bit interpreter"
+    if os_name == "win32" and plat != "win-amd64":
         return CheckResult(
-            "architecture", Status.FAIL, f"{detail}: MetaTrader5 needs x64 Python (emulated)"
+            "architecture", Status.FAIL, f"{detail}: MetaTrader5 needs x64 Python (win-amd64)"
         )
     return CheckResult("architecture", Status.OK, detail)
 
