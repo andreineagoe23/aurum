@@ -1,16 +1,23 @@
 """``aurum`` command line. Commands for later phases exist as placeholders that exit with code 2."""
 
-from datetime import datetime
-from typing import Annotated, NoReturn
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Annotated, NoReturn
+from zoneinfo import ZoneInfo
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
-from aurum.core.errors import ConfigError
+from aurum.core.clock import SystemClock
+from aurum.core.errors import AurumError, ConfigError
+from aurum.core.timeframes import Timeframe
 from aurum.ledger.trial_ledger import TrialLedger
 from aurum.monitoring.doctor import Status, run_checks
-from aurum.settings import load_settings
+from aurum.monitoring.logging import configure_logging
+from aurum.settings import Settings, load_settings
+
+if TYPE_CHECKING:
+    from aurum.adapters.mt5 import MT5Broker
 
 app = typer.Typer(
     no_args_is_help=True, help="Aurum: intraday XAUUSD research platform (demo only)."
@@ -65,16 +72,118 @@ def doctor() -> None:
 
 
 # ---------------------------------------------------------------------------- mt5 (Phase 1)
+def _connected_broker() -> tuple["MT5Broker", Settings]:
+    """Load settings, configure JSON logs (stderr) and connect, or exit 1 with the reason."""
+    from aurum.adapters.mt5 import MT5Broker
+
+    try:
+        settings = load_settings()
+    except ConfigError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    configure_logging()
+    broker = MT5Broker(settings)
+    try:
+        broker.connect()
+    except AurumError as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    return broker, settings
+
+
 @mt5_app.command("ping")
 def mt5_ping() -> None:
-    """Connect to the terminal and print terminal/account info (demo?)."""
-    _not_yet("mt5 ping", 1)
+    """Connect to the terminal and print terminal/account info (demo?) and the server clock."""
+    broker, settings = _connected_broker()
+    try:
+        account = broker.account_info()
+        symbol = broker.resolve_symbol()
+        tick = broker.latest_tick(symbol)
+        check = broker.server_time_check
+    finally:
+        broker.disconnect()
+    table = Table(title="aurum mt5 ping", show_header=False)
+    demo = "[green]DEMO[/]" if account.is_demo else f"[bold red]{account.trade_mode}[/]"
+    rows = [
+        ("account", f"{account.login} @ {account.server}"),
+        ("trade mode", demo),
+        ("currency", f"{account.currency} (config: {settings.config.broker.account_currency})"),
+        ("balance / equity", f"{account.balance:.2f} / {account.equity:.2f}"),
+        ("leverage", f"1:{account.leverage}"),
+        ("aurum mode", str(settings.mode)),
+        ("symbol", symbol),
+        ("last quote (UTC)", f"{tick.time.isoformat()}  bid {tick.bid}  ask {tick.ask}"),
+    ]
+    if check is not None:
+        rows.append(
+            (
+                "server clock",
+                f"{check.status}: expected UTC{_hours(check.expected)}, "
+                f"measured UTC{_hours(check.measured)}",
+            )
+        )
+    for name, value in rows:
+        table.add_row(name, value)
+    console.print(table)
+
+
+def _hours(delta: timedelta) -> str:
+    return f"{delta.total_seconds() / 3600:+.2f}h"
 
 
 @mt5_app.command("symbols")
 def mt5_symbols(find: Annotated[str, typer.Option(help="Search term, e.g. gold")] = "gold") -> None:
-    """Discover the broker's XAUUSD symbol and snapshot its spec."""
-    _not_yet("mt5 symbols", 1)
+    """Discover the broker's XAUUSD symbol and snapshot its spec to <data_dir>/specs/."""
+    from aurum.adapters.mt5.snapshot import write_symbol_snapshot
+
+    broker, settings = _connected_broker()
+    try:
+        matches = broker.find_symbols(find)
+        symbol = broker.resolve_symbol()
+        spec = broker.symbol_info(symbol)
+        raw = broker.symbol_snapshot(symbol)
+        server = broker.account_info().server
+    finally:
+        broker.disconnect()
+    console.print(f"symbols matching {find!r}: {', '.join(matches) or '(none)'}")
+    table = Table(title=f"trading symbol: {symbol}", show_header=False)
+    for name, value in spec.model_dump().items():
+        table.add_row(name, str(value))
+    console.print(table)
+    path = write_symbol_snapshot(settings.data_dir, spec, raw, server=server)
+    console.print(f"snapshot written to {path}")
+
+
+@mt5_app.command("bars")
+def mt5_bars(
+    tf: Annotated[str, typer.Option(help="M1, M5, M15 or H1")] = "M5",
+    count: Annotated[int, typer.Option(min=1, max=500)] = 5,
+) -> None:
+    """Print the latest completed bars with UTC and London open/close times."""
+    timeframe = Timeframe.parse(tf)
+    broker, settings = _connected_broker()
+    try:
+        symbol = broker.resolve_symbol()
+        end = SystemClock().now()
+        bars = broker.bars(symbol, timeframe, end - timeframe.duration * (count + 600), end)
+    finally:
+        broker.disconnect()
+    london = ZoneInfo(settings.config.sessions.timezone)
+    table = Table(title=f"{symbol} {timeframe} (bid, completed only)")
+    for col in ("open UTC", "close UTC", "close London", "open", "high", "low", "close", "spread"):
+        table.add_column(col)
+    for b in bars[-count:]:
+        table.add_row(
+            b.open_time.strftime("%Y-%m-%d %H:%M"),
+            b.close_time.strftime("%H:%M"),
+            b.close_time.astimezone(london).strftime("%H:%M %Z"),
+            f"{b.open:.2f}",
+            f"{b.high:.2f}",
+            f"{b.low:.2f}",
+            f"{b.close:.2f}",
+            str(b.spread_points),
+        )
+    console.print(table)
 
 
 # ---------------------------------------------------------------------------- data (Phase 2)
