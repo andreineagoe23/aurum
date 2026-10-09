@@ -443,6 +443,22 @@ def test_unapproved_intent_refused_before_touching_terminal(
 # --------------------------------------------------------------------------- trading
 
 
+def test_stale_intent_is_refused_but_duplicates_still_found(
+    broker: MT5Broker, mt5: FakeMT5, clock: ManualClock
+) -> None:
+    sent = gold_intent()
+    first = broker.send_order(sent)
+    clock.advance(timedelta(seconds=61))
+    again = broker.send_order(sent)  # already at the broker: recognised, not refused
+    assert again.duplicate
+    assert again.position_id == first.position_id
+    stale = gold_intent(side=Side.SELL)
+    report = broker.send_order(stale)
+    assert report.status is ExecutionStatus.REJECTED
+    assert "stale intent: 61.0 s old > 60 s" in report.message
+    assert len(mt5.sent) == 1
+
+
 def test_market_order_round_trip(broker: MT5Broker, mt5: FakeMT5, app_config: AppConfig) -> None:
     i = gold_intent()
     report = broker.send_order(i)

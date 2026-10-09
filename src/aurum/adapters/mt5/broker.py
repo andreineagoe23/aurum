@@ -667,6 +667,14 @@ class MT5Broker:
         if existing is not None:
             log.info("mt5.duplicate", key=key, order=existing.order_id)
             return existing.model_copy(update={"duplicate": True})
+        age = self._clock.now() - intent.created_at
+        if age.total_seconds() > self._broker_cfg.max_intent_age_seconds:
+            return self._rejected(
+                key,
+                None,
+                f"stale intent: {age.total_seconds():.1f} s old > "
+                f"{self._broker_cfg.max_intent_age_seconds:.0f} s, not sent",
+            )
 
         spec = self.symbol_info(intent.symbol)
         if not spec.is_valid_volume(intent.volume):
