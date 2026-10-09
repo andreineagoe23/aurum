@@ -27,7 +27,12 @@ from 2026-06-26 (ADR-0007); before that, back to 2020-11-12, only M1 bars exist.
    first and the trade is flagged `intrabar_rule = sl_tp_same_bar` (`worst_case = true`). For
    a pending entry triggered inside a bar, the stop is assumed to follow the entry, a target
    counts only when it must have come after it, and the trade is flagged `entry_bar` when that
-   assumption decided anything. On exact tick days, ticks decide and nothing is flagged.
+   assumption decided anything. A requested close (timeout, force-flat, kill) arriving inside
+   a bar that also reaches the stop takes the stop (worst case); if the bar reaches only the
+   target, the close at the open is assumed first and the target is not credited. Both are
+   flagged `close_bar` (added 2026-10-09 in Phase 4, after the full-history run exposed the
+   unflagged and target-crediting cases). On exact tick days, ticks decide and nothing is
+   flagged.
 6. **Costs.** Commission `per_lot_per_side × volume` per fill, rounded to cents and booked
    negative, as the broker does (measured 2026-10-09: 2.25/lot/side; a 0.01-lot fill books
    0.02). Profit is booked to the cent.
