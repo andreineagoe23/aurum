@@ -4,6 +4,7 @@ import json
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import polars as pl
 import pytest
 from typer.testing import CliRunner
 
@@ -47,15 +48,22 @@ def test_run_writes_outputs_and_records_a_trial(env: tuple[Path, Path]) -> None:
     assert manifest["params"]["latency_ms"] == 200
     assert manifest["params"]["variant"] == "m5"
     assert f"trades sha256: {manifest['outputs']['trades']}" in output
+    assert manifest["params"]["risk_engine"] == "PolicyRiskEngine"
     trades = read_trades(RunLayout(runs), run_id)
-    # Two entries per day (08:00 BUY, 14:30 SELL), one tick day and one bar day.
-    assert trades.height == 4
+    # The 08:00 BUY trades on both days (one tick day, one bar day). The 14:30 SELL's
+    # 3000-point stop needs ~30 USD at 0.01 lot: over the 25 USD budget (0.25% of 10,000).
+    assert trades.height == 2
     assert set(trades["entry_mode"]) == {"ticks", "bars"}
+    assert set(trades["volume"]) == {0.02}
+    journal = pl.read_parquet(RunLayout(runs).journal(run_id))
+    rejected = journal.filter(pl.col("event") == "risk_rejected")["detail"].to_list()
+    assert len(rejected) == 2
+    assert all("< volume_min 0.01" in r for r in rejected)
     with TrialLedger(ledger_path(data)) as ledger:
         (trial,) = ledger.list_trials()
     assert trial.trial_id == manifest["trial_id"]
     assert trial.params["run_id"] == run_id
-    assert trial.metrics["trades"] == 4
+    assert trial.metrics["trades"] == 2
     summary = json.loads((runs / run_id / "summary.json").read_text(encoding="utf-8"))
     assert summary["tick_days"] == 1
     assert summary["bar_days"] == 1
@@ -97,6 +105,22 @@ def test_unknown_strategy_or_run_fails_cleanly(env: tuple[Path, Path]) -> None:
     assert phase5.exit_code == 1
     assert "Phase 5" in phase5.output
     assert runner.invoke(app, ["backtest", "report", "missing"]).exit_code == 1
+    bad_risk = runner.invoke(
+        app,
+        [
+            "backtest",
+            "run",
+            "reference_fixed_time",
+            "--from",
+            "2026-09-14",
+            "--to",
+            "2026-09-15",
+            "--risk",
+            "yolo",
+        ],
+    )
+    assert bad_risk.exit_code == 1
+    assert "--risk must be policy or fixed" in bad_risk.output
 
 
 def test_run_ids_sort_by_creation_within_one_second() -> None:

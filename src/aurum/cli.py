@@ -679,6 +679,9 @@ def backtest_run(
     slippage_points: Annotated[
         float | None, typer.Option(help="Override broker.slippage.points_per_side")
     ] = None,
+    risk: Annotated[
+        str, typer.Option(help="policy (risk.yaml) or fixed (parity check only)")
+    ] = "policy",
     notes: Annotated[str, typer.Option(help="Free text stored with the run and the trial")] = "",
 ) -> None:
     """Run one backtest; writes reports/runs/<run_id>/ and records a trial in the ledger."""
@@ -692,8 +695,12 @@ def backtest_run(
         last=date.fromisoformat(to),
         latency_ms=latency_ms,
         slippage_points=slippage_points,
+        risk="fixed" if risk == "fixed" else "policy",
         notes=notes,
     )
+    if risk not in ("policy", "fixed"):
+        console.print(f"[red]--risk must be policy or fixed, not {risk!r}[/red]")
+        raise typer.Exit(1)
     try:
         outcome = execute(settings, request, runs=_runs(settings), clock=SystemClock())
     except (AurumError, FileNotFoundError, ValueError) as exc:

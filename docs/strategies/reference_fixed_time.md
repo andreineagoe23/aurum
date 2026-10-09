@@ -20,7 +20,9 @@ results are identical, because both entry times are closes on both grids).
 
 - `close` = bid close of the decision-timeframe bar that closed at the entry time. If that bar
   is missing (data gap), there is no entry.
-- Market order, fixed volume `backtest.fixed_volume_lots` (0.10), one position at a time.
+- Market order, one position at a time. Volume: the Phase 4 risk engine by default
+  (`--risk policy`); the parity check uses a fixed `backtest.fixed_volume_lots` (0.10) with
+  `--risk fixed`, because the EA trades a fixed volume.
 - Exits: broker-side stop and target, `max_hold` measured from the decision instant (TIMEOUT),
   and force-flat at `min(20:00 London, market close - 15 min)`.
 - 08:00 UTC and 14:30 UTC are inside `london_morning` and `ldn_ny_overlap` in summer and winter
@@ -38,7 +40,7 @@ closes (the EA does not model early closes).
 Aurum run: `20261009T221629Z_reference_fixed_time_m5_be6c94` (38 trades), made with
 
 ```
-uv run aurum backtest run reference_fixed_time --from 2026-09-14 --to 2026-10-08 --variant m5 --latency-ms 0 --slippage-points 0
+uv run aurum backtest run reference_fixed_time --from 2026-09-14 --to 2026-10-08 --variant m5 --latency-ms 0 --slippage-points 0 --risk fixed
 ```
 
 Trades are paired by UTC entry date and side. Proposed tolerances (`aurum backtest parity` options):

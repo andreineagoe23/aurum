@@ -216,7 +216,7 @@ def csv_from_run(path: Path, trades: list[ParityTrade], nudge_points: int = 0) -
 def test_parity_cli_end_to_end(env: tuple[Path, Path], tmp_path: Path) -> None:
     _, runs = env
     args = ["backtest", "run", "reference_fixed_time", "--from", "2026-09-14", "--to", "2026-09-15"]
-    ran = runner.invoke(app, [*args, "--variant", "m5", "--latency-ms", "0"])
+    ran = runner.invoke(app, [*args, "--variant", "m5", "--latency-ms", "0", "--risk", "fixed"])
     assert ran.exit_code == 0, ran.output
     (run_id,) = RunLayout(runs).runs()
     trades = from_trades_frame(read_trades(RunLayout(runs), run_id))

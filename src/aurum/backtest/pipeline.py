@@ -10,7 +10,7 @@ import json
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
 from aurum.adapters.storage.specs import latest_spec
@@ -25,8 +25,11 @@ from aurum.data.market_hours import MarketHours
 from aurum.execution.engine import Engine
 from aurum.ledger.trial_ledger import TrialLedger, current_code_version
 from aurum.ports.clock import ClockPort
+from aurum.risk.base import RiskEngine
 from aurum.risk.fixed import FixedVolumeRisk
+from aurum.risk.policy import PolicyRiskEngine
 from aurum.sessions.calendar import TradingCalendar
+from aurum.sessions.news import NewsBlackout
 from aurum.settings import AppConfig, Settings
 from aurum.strategies.registry import build_strategy
 
@@ -43,6 +46,9 @@ class RunRequest:
     """Override of backtest.latency_ms."""
     slippage_points: float | None = None
     """Override of broker.slippage.points_per_side."""
+    risk: Literal["policy", "fixed"] = "policy"
+    """``policy``: the Phase 4 risk engine (risk.yaml). ``fixed``: backtest.fixed_volume_lots
+    on every approved signal, only for the MT5 Strategy Tester parity check."""
     notes: str = ""
 
 
@@ -110,13 +116,25 @@ def execute(
         market_hours=hours,
     )
     broker.connect()
+    risk_engine: RiskEngine = (
+        PolicyRiskEngine(
+            cfg.risk,
+            commission_per_lot_side=commission,
+            stop_slippage_points=slippage,
+            news=NewsBlackout(cfg.risk.news_blackout),
+        )
+        if request.risk == "policy"
+        else FixedVolumeRisk(bt.fixed_volume_lots, commission)
+    )
     engine = Engine(
         broker=broker,
         strategy=strategy,
-        risk=FixedVolumeRisk(bt.fixed_volume_lots, commission),
+        risk=risk_engine,
         calendar=calendar,
         symbol=symbol,
         magic=cfg.broker.magic_number,
+        max_intent_age=timedelta(seconds=cfg.broker.max_intent_age_seconds),
+        atr_period=cfg.risk.atr_period,
     )
     result = run_backtest(
         engine=engine,
@@ -145,8 +163,11 @@ def execute(
         "commission_per_lot_side": commission,
         "bar_spread_extra_points": bt.bar_spread_extra_points,
         "max_quote_wait_seconds": bt.max_quote_wait_seconds,
-        "volume_lots": bt.fixed_volume_lots,
-        "risk_engine": "FixedVolumeRisk (Phase 3 stand-in)",
+        "risk_engine": (
+            "PolicyRiskEngine" if request.risk == "policy" else "FixedVolumeRisk (parity only)"
+        ),
+        "volume_lots": bt.fixed_volume_lots if request.risk == "fixed" else None,
+        "risk_per_trade_pct": cfg.risk.risk_per_trade_pct if request.risk == "policy" else None,
         "initial_balance": bt.initial_balance,
         "leverage": bt.leverage,
         "market_close_buffer_minutes": cfg.sessions.market_close_buffer_minutes,
