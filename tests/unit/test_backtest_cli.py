@@ -46,6 +46,7 @@ def test_run_writes_outputs_and_records_a_trial(env: tuple[Path, Path]) -> None:
     assert manifest["tick_days"] == ["2026-09-15"]
     assert manifest["params"]["latency_ms"] == 200
     assert manifest["params"]["variant"] == "m5"
+    assert f"trades sha256: {manifest['outputs']['trades']}" in output
     trades = read_trades(RunLayout(runs), run_id)
     # Two entries per day (08:00 BUY, 14:30 SELL), one tick day and one bar day.
     assert trades.height == 4

@@ -185,7 +185,7 @@ def execute(
             config_hash=cfg_hash,
         )
     manifest["trial_id"] = trial.trial_id
-    write_run(
+    manifest["outputs"] = write_run(
         runs,
         run_id,
         trades=trades,
