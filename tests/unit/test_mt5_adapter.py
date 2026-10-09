@@ -328,6 +328,7 @@ def test_history_deals_skip_balance_entries(broker: MT5Broker, mt5: FakeMT5) -> 
     assert deals[0].entry is DealEntry.IN
     assert deals[0].time == NOW
     assert deals[0].reason is DealReason.EXPERT
+    assert deals[0].magic == mt5.sent[0]["magic"]
 
 
 @pytest.mark.parametrize(

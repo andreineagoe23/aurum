@@ -318,6 +318,7 @@ class FakeBroker:
                 commission,
                 0.0,
                 intent.idempotency_key,
+                intent.magic,
             )
             report = ExecutionReport(
                 status=ExecutionStatus.FILLED,
@@ -380,6 +381,7 @@ class FakeBroker:
                 commission,
                 profit,
                 pos.idempotency_key,
+                pos.magic,
             )
             return ExecutionReport(
                 status=ExecutionStatus.CLOSED,
@@ -437,6 +439,7 @@ class FakeBroker:
         commission: float,
         profit: float,
         key: str | None,
+        magic: int = 0,
     ) -> DealRecord:
         deal = DealRecord(
             deal_id=self._new_id(),
@@ -451,6 +454,7 @@ class FakeBroker:
             commission=commission,
             profit=profit,
             idempotency_key=key,
+            magic=magic,
         )
         self._deals.append(deal)
         return deal

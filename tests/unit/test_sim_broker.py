@@ -208,6 +208,8 @@ def test_buy_stop_entry_fills_at_triggering_ask() -> None:
     assert trade.exit_price == 1999.00  # then the stop gapped too
     assert trade.profit == pytest.approx(-42.00)
     assert broker.orders() == []
+    deals = broker.history_deals(at("07:00"), at("09:00"))
+    assert [d.magic for d in deals] == [trade.magic, trade.magic]
 
 
 def test_pending_price_must_respect_side_and_cancel_works() -> None:

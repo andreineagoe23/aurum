@@ -670,6 +670,7 @@ class SimBroker:
         profit: float,
         key: str | None,
         reason: DealReason,
+        magic: int,
     ) -> DealRecord:
         deal = DealRecord(
             deal_id=self._new_id(),
@@ -685,6 +686,7 @@ class SimBroker:
             profit=profit,
             idempotency_key=key,
             reason=reason,
+            magic=magic,
         )
         self._book.deals.append(deal)
         return deal
@@ -745,6 +747,7 @@ class SimBroker:
             profit=0.0,
             key=key,
             reason=DealReason.EXPERT,
+            magic=magic,
         )
         return pos
 
@@ -766,6 +769,7 @@ class SimBroker:
             profit=profit,
             key=pos.key,
             reason=exit_.reason,
+            magic=pos.magic,
         )
         intrabar = exit_.intrabar if exit_.intrabar is not IntrabarRule.NONE else pos.intrabar
         self._book.trades.append(

@@ -292,6 +292,8 @@ class DealRecord(DomainModel):
     idempotency_key: str | None = None
     reason: DealReason | None = None
     """Why the deal happened (stop loss, take profit, API request...), when the broker says."""
+    magic: int = 0
+    """The order's magic number (ownership needs it together with the "AU" key prefix)."""
 
 
 # ------------------------------------------------------------------------------ decisions

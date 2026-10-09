@@ -503,6 +503,7 @@ class MT5Broker:
             profit=d.profit + d.swap,
             idempotency_key=self._key(d.comment),
             reason=self._deal_reason(d.reason),
+            magic=d.magic,
         )
 
     def _deal_reason(self, code: int) -> DealReason:
