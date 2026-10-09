@@ -41,7 +41,12 @@ def test_weekends_and_closed_dates_have_no_session(hours: MarketHours) -> None:
     assert hours.session(date(2026, 4, 11)) is None  # Saturday
     assert hours.session(date(2026, 4, 12)) is None  # Sunday
     assert hours.session(date(2026, 4, 3)) is None  # Good Friday (measured: no ticks)
-    assert hours.session(date(2026, 7, 3)) is None  # Independence Day observed
+
+
+def test_independence_day_observed_was_an_early_close(hours: MarketHours) -> None:
+    s = hours.session(date(2026, 7, 3))  # measured: last bar 13:00 New York
+    assert s is not None
+    assert s.close == utc(2026, 7, 3, 17, 1)
 
 
 @pytest.mark.parametrize(
