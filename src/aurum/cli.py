@@ -533,6 +533,46 @@ def data_spreads(
     console.print(f"report: {report}")
 
 
+@data_app.command("hashes")
+def data_hashes(
+    compare_to: Annotated[
+        Path | None,
+        typer.Option("--compare", help="An earlier manifest (JSON) or another data dir to compare"),
+    ] = None,
+) -> None:
+    """Write a SHA-256 manifest of raw history, normalized and canonical data. With --compare,
+    exit 1 unless every file is identical (the Phase 2 exit gate)."""
+    from aurum.data.hashes import COVERED, compare, load_manifest, manifest
+
+    settings = _settings_or_exit()
+    layout = DataLayout(settings.data_dir)
+    current = manifest(layout)
+    path = write_report(layout, "hashes", current)
+    console.print(f"{len(current['files'])} files hashed; manifest: {path}")
+    if compare_to is None:
+        return
+    other = manifest(DataLayout(compare_to)) if compare_to.is_dir() else load_manifest(compare_to)
+    table = Table(title=f"identical file hashes vs {compare_to}")
+    for col in ("dataset", "identical", "differ", "only here", "only there"):
+        table.add_column(col)
+    failed = False
+    for prefix in COVERED:
+        d = compare(current, other, prefix)
+        failed |= not d.ok
+        table.add_row(
+            prefix,
+            str(d.identical),
+            str(len(d.differ)),
+            str(len(d.only_left)),
+            str(len(d.only_right)),
+        )
+        for name in (d.differ + d.only_left + d.only_right)[:10]:
+            console.print(f"  [yellow]{name}[/yellow]")
+    console.print(table)
+    if failed:
+        raise typer.Exit(1)
+
+
 # ---------------------------------------------------------------------------- research
 @backtest_app.command("run")
 def backtest_run(
