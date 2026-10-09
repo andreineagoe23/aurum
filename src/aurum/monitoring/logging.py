@@ -45,6 +45,18 @@ def configure_logging(level: str = "INFO", *, json: bool = True) -> None:
             renderer,
         ],
         wrapper_class=structlog.make_filtering_bound_logger(logging.getLevelName(level.upper())),
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
+        logger_factory=structlog.PrintLoggerFactory(file=_CurrentStderr()),  # type: ignore[arg-type]
         cache_logger_on_first_use=True,
     )
+
+
+class _CurrentStderr:
+    """Writes to whatever ``sys.stderr`` is *now*. Cached loggers outlive redirections (test
+    runners, CLI harnesses); binding the stream object at configure time would leave them
+    writing to a closed file."""
+
+    def write(self, text: str) -> int:
+        return sys.stderr.write(text)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
