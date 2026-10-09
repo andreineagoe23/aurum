@@ -21,7 +21,9 @@ OUTPUTS = ("trades", "equity", "journal")
 
 
 def new_run_id(created_at: datetime, strategy: str, variant: str) -> str:
-    return f"{created_at:%Y%m%dT%H%M%SZ}_{strategy}_{variant}_{secrets.token_hex(3)}"
+    """``<UTC stamp to the microsecond>Z_<strategy>_<variant>_<6 hex>``: ids sort by creation
+    time even for runs started within the same second."""
+    return f"{created_at:%Y%m%dT%H%M%S%f}Z_{strategy}_{variant}_{secrets.token_hex(3)}"
 
 
 def _json(path: Path, body: dict[str, Any]) -> None:

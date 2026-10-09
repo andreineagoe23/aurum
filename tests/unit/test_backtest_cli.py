@@ -1,14 +1,14 @@
 """`aurum backtest run/report/compare` end to end on a synthetic data store."""
 
 import json
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 from aurum.adapters.storage.layout import RunLayout, ledger_path
-from aurum.backtest.storage import read_manifest, read_trades
+from aurum.backtest.storage import new_run_id, read_manifest, read_trades
 from aurum.cli import app
 from aurum.ledger.trial_ledger import TrialLedger
 from tests.sim_store import write_store
@@ -97,3 +97,10 @@ def test_unknown_strategy_or_run_fails_cleanly(env: tuple[Path, Path]) -> None:
     assert phase5.exit_code == 1
     assert "Phase 5" in phase5.output
     assert runner.invoke(app, ["backtest", "report", "missing"]).exit_code == 1
+
+
+def test_run_ids_sort_by_creation_within_one_second() -> None:
+    # Regression: second-resolution ids sorted by their random suffix within a second.
+    t = datetime(2026, 10, 9, 22, 29, 44, 900_000, tzinfo=UTC)
+    ids = [new_run_id(t + timedelta(microseconds=n * 30_000), "s", "m5") for n in range(3)]
+    assert sorted(ids) == ids
