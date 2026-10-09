@@ -7,8 +7,9 @@ import pytest
 from aurum.backtest.broker import IntrabarRule, SimBroker
 from aurum.backtest.market import DataMode
 from aurum.core.enums import DealEntry, DealReason, ExecutionStatus, OrderType, Side
-from aurum.core.errors import SafetyViolationError
+from aurum.core.errors import BrokerError, NoMarketDataError, SafetyViolationError
 from aurum.core.models import OrderIntent
+from aurum.core.timeframes import Timeframe
 from aurum.data.market_hours import MarketHours
 from aurum.ports.broker import BrokerPort
 from aurum.settings import AppConfig
@@ -340,3 +341,68 @@ def test_bar_mode_close_without_a_bar_waits_and_fails() -> None:
     assert report.status is ExecutionStatus.REJECTED
     assert report.message == "no quote"
     assert len(broker.positions()) == 1
+
+
+# ------------------------------------------------------------------------------ BrokerPort reads
+
+
+def test_data_reads_never_reach_past_now() -> None:
+    broker, clock = sim(market(ticks={DAY: TAPE}))
+    clock.set(at("08:00:01"))
+    ticks = broker.ticks("XAUUSD", at("07:00"), at("09:00"))
+    assert [t.time for t in ticks][-1] == at("08:00:01")  # inclusive of now, nothing later
+    assert len(ticks) == 5
+    assert broker.latest_tick("XAUUSD").bid == 2001.00
+    m1 = broker.bars("XAUUSD", Timeframe.M1, at("07:00"), at("09:00"))
+    assert [b.open_time for b in m1] == [at("07:59")]  # the 08:00 bar has not closed
+    clock.set(at("08:01"))
+    m1 = broker.bars("XAUUSD", Timeframe.M1, at("07:00"), at("09:00"))
+    assert [b.open_time for b in m1] == [at("07:59"), at("08:00")]
+    assert (m1[1].close, m1[1].spread_points) == (1999.50, 10)
+    with pytest.raises(BrokerError):
+        broker.latest_tick("EURUSD")
+
+
+def test_latest_tick_without_any_quote_raises() -> None:
+    broker, clock = sim(market(ticks={DAY: TAPE}))
+    clock.set(at("07:00"))
+    with pytest.raises(NoMarketDataError):
+        broker.latest_tick("XAUUSD")
+
+
+def test_check_order_reports_reasons_and_margin() -> None:
+    broker = ticks_sim()
+    ok = broker.check_order(order())
+    assert ok.ok
+    assert ok.margin_required == pytest.approx(80.004)  # 0.20 x 100 oz x ask 2000.10 / 500
+    bad = broker.check_order(intent(Side.BUY, 0.005, stop_loss=1999.0, t=T0))
+    assert not bad.ok
+    assert any("invalid volume" in r for r in bad.reasons)
+    early, clock = sim(market(ticks={DAY: TAPE}))
+    clock.set(at("07:00"))
+    assert "no quote" in early.check_order(order()).reasons
+
+
+def test_sell_limit_entry_fills_at_its_price_then_target() -> None:
+    broker = ticks_sim()
+    placed = broker.send_order(
+        order(Side.SELL, sl=2002.00, tp=1999.50, entry_type=OrderType.LIMIT, entry_price=2000.90)
+    )
+    assert placed.status is ExecutionStatus.PLACED
+    broker.advance_to(at("08:01"))
+    (trade,) = broker.trades
+    assert (trade.entry_time, trade.entry_price) == (at("08:00:01"), 2000.90)  # bid 2001.00
+    assert (trade.entry_bid, trade.entry_ask) == (2000.90, pytest.approx(2001.00))
+    assert (trade.exit_reason, trade.exit_price) == (DealReason.TAKE_PROFIT, 1999.50)
+    assert trade.profit == pytest.approx(28.00)  # 1.40 x 100 oz x 0.20
+
+
+def test_sell_stop_entry_fills_at_triggering_bid_with_slippage() -> None:
+    broker = ticks_sim(slippage=5)
+    broker.send_order(
+        order(Side.SELL, sl=2001.50, tp=1998.00, entry_type=OrderType.STOP, entry_price=1999.50)
+    )
+    broker.advance_to(at("08:01"))
+    (pos,) = broker.positions()
+    assert pos.open_price == pytest.approx(1998.95)  # bid 1999.00 at 08:00:02 - 5 points
+    assert broker.orders() == []
