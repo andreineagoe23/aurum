@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 import pytest
 
 from aurum.adapters.mt5.servertime import OffsetCheck, ServerTimeZone, check_offset
@@ -79,3 +80,13 @@ def test_check_offset(quote_offset_s: float, status: OffsetCheck) -> None:
     assert m.status is status
     assert m.expected == timedelta(hours=3)
     assert m.residual == timedelta(seconds=quote_offset_s - 10_800)
+
+
+def test_vectorised_conversion_of_phase1_sample_and_empty() -> None:
+    tz = ServerTimeZone()
+    # 2026-10-09 server 03:35:42.123 (UTC+3) and a US-winter value (UTC+2).
+    summer = int(tz.to_server_seconds(datetime(2026, 10, 9, 0, 35, 42, tzinfo=UTC))) * 1000 + 123
+    winter = int(tz.to_server_seconds(datetime(2026, 1, 13, 14, 0, tzinfo=UTC))) * 1000
+    got = tz.to_utc_ms(np.array([summer, winter], dtype=np.int64))
+    assert got.tolist() == [summer - 3 * 3_600_000, winter - 2 * 3_600_000]
+    assert tz.to_utc_ms(np.array([], dtype=np.int64)).size == 0

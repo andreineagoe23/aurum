@@ -1,0 +1,48 @@
+# Data foundation (Phase 2): market hours, backfill, live collector and data QA.
+# Clock times are quoted "HH:MM" in the stated timezone. Dates are YYYY-MM-DD.
+
+# XAUUSD trading hours at Fusion, measured from ticks (reports/phase_2.md): the market opens at
+# 18:00 New York (Sunday to Thursday), the last tick of the day is at 16:58:5x, and it is closed
+# 16:59-18:00 New York every day (= server 23:59-01:00, ADR-0004) and from Friday 16:59 to
+# Sunday 18:00. A trading date D runs from 18:00 New York on D-1 to 16:59 on D.
+market:
+  timezone: America/New_York
+  open: "18:00"
+  close: "16:59"
+  # The first tick after an open can arrive this late (measured: up to 18:01:00).
+  open_grace_minutes: 2
+  # Weekday trading dates with no trading at all. A missing weekday that is not listed here is
+  # an unexplained gap in data QA.
+  closed_dates:
+    2026-04-03: Good Friday
+    2026-07-03: Independence Day (observed)
+  # Trading dates that end early: New York close time instead of `close`.
+  early_closes: {}
+
+backfill:
+  # Measured depth (reports/phase_2.md §1): continuous M1..H1 bars since 2020-11-12, ticks
+  # since 2026-03-29 22:00 UTC. Earlier bars are one placeholder per day, not history.
+  bars_from: 2020-11-12
+  ticks_from: 2026-03-29
+  timeframes: [M1, M5, M15, H1]
+  # Bars are requested in windows of this many days and stored one file per UTC day.
+  bar_chunk_days: 31
+  # A weekday that returns no ticks/bars is asked again this often before it is stored empty.
+  empty_retries: 3
+  retry_seconds: 2.0
+
+collector:
+  poll_seconds: 1.0             # how often new ticks are requested from the terminal
+  flush_seconds: 300            # buffered ticks are written at least this often
+  heartbeat_seconds: 60         # heartbeat file + log line
+  gap_record_seconds: 60        # tick gaps longer than this while the market is open are recorded
+  settle_seconds: 5             # wait after a (re)connect so the terminal can sync history
+  pause_detect_seconds: 30      # a loop iteration this late means the VM slept or froze
+  reconnect_initial_seconds: 1
+  reconnect_max_seconds: 300
+
+qa:
+  # A tick whose spread exceeds this multiple of its UTC day's median spread is an outlier.
+  spread_outlier_factor: 5.0
+  # A minute whose maximum spread exceeds this multiple of its session's median is a spike.
+  spread_spike_factor: 3.0

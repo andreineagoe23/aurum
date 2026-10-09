@@ -221,6 +221,88 @@ class PromotionConfig(_Config):
         return self
 
 
+# ------------------------------------------------------------------------------ data.yaml
+
+
+def _check_timezone(value: str) -> str:
+    try:
+        ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"unknown timezone {value!r}") from exc
+    return value
+
+
+class MarketHoursConfig(_Config):
+    """When the instrument trades, in ``timezone`` wall clock (measured, see data.yaml).
+
+    Trading date D runs from ``open`` on D-1 to ``close`` on D, Monday to Friday. A date in
+    ``closed_dates`` has no trading at all; ``early_closes`` replaces ``close`` for that date.
+    """
+
+    timezone: str
+    open: ClockTime
+    close: ClockTime
+    open_grace_minutes: int = Field(default=2, ge=0, le=30)
+    closed_dates: dict[date, str] = Field(default_factory=dict)
+    early_closes: dict[date, ClockTime] = Field(default_factory=dict)
+
+    _tz = field_validator("timezone")(_check_timezone)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.close >= self.open:
+            raise ValueError("market close must be before open (the session spans midnight)")
+        for d in (*self.closed_dates, *self.early_closes):
+            if d.weekday() >= 5:
+                raise ValueError(f"{d} is a weekend: only weekday trading dates can be listed")
+        for d, t in self.early_closes.items():
+            if t >= self.close:
+                raise ValueError(f"early close {t} on {d} is not before the normal close")
+            if d in self.closed_dates:
+                raise ValueError(f"{d} is both closed and an early close")
+        return self
+
+
+class BackfillConfig(_Config):
+    bars_from: date
+    ticks_from: date
+    timeframes: list[Literal["M1", "M5", "M15", "H1"]] = Field(min_length=1)
+    bar_chunk_days: int = Field(default=31, ge=1, le=366)
+    empty_retries: int = Field(default=3, ge=0, le=20)
+    retry_seconds: float = Field(default=2.0, ge=0, le=60)
+
+
+class CollectorConfig(_Config):
+    poll_seconds: float = Field(gt=0, le=60)
+    flush_seconds: float = Field(gt=0, le=3600)
+    heartbeat_seconds: float = Field(gt=0, le=3600)
+    gap_record_seconds: float = Field(gt=0)
+    settle_seconds: float = Field(ge=0, le=120)
+    pause_detect_seconds: float = Field(gt=0)
+    reconnect_initial_seconds: float = Field(gt=0)
+    reconnect_max_seconds: float = Field(gt=0, le=3600)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.reconnect_max_seconds < self.reconnect_initial_seconds:
+            raise ValueError("reconnect_max_seconds must be >= reconnect_initial_seconds")
+        if self.pause_detect_seconds <= self.poll_seconds:
+            raise ValueError("pause_detect_seconds must exceed poll_seconds")
+        return self
+
+
+class QaConfig(_Config):
+    spread_outlier_factor: float = Field(gt=1)
+    spread_spike_factor: float = Field(gt=1)
+
+
+class DataConfig(_Config):
+    market: MarketHoursConfig
+    backfill: BackfillConfig
+    collector: CollectorConfig
+    qa: QaConfig
+
+
 # ------------------------------------------------------------------------------ strategies/
 
 
@@ -249,6 +331,7 @@ class AppConfig(_Config):
     sessions: SessionsConfig
     risk: RiskConfig
     promotion: PromotionConfig
+    data: DataConfig
     strategies: dict[str, StrategyConfig]
 
     @model_validator(mode="after")
@@ -275,7 +358,7 @@ def load_config(config_dir: Path) -> AppConfig:
     """Load and validate every YAML in ``config_dir``. Raises ``ConfigError`` on any problem."""
     raw: dict[str, Any] = {
         name: _read_yaml(config_dir / f"{name}.yaml")
-        for name in ("broker", "sessions", "risk", "promotion")
+        for name in ("broker", "sessions", "risk", "promotion", "data")
     }
     strategies_dir = config_dir / "strategies"
     raw["strategies"] = (

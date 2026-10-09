@@ -17,7 +17,16 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
+import numpy as np
+import numpy.typing as npt
+
 from aurum.core.timeutil import EPOCH, to_utc
+
+_HOUR_MS = 3_600_000
+
+
+def _epoch_ms(t: datetime) -> int:
+    return (t - EPOCH) // timedelta(milliseconds=1)
 
 
 @dataclass(frozen=True)
@@ -46,6 +55,23 @@ class ServerTimeZone:
         wall = (EPOCH + timedelta(seconds=server_seconds)).replace(tzinfo=None)
         local = (wall - self._shift).replace(tzinfo=self._zone, fold=0)
         return local.astimezone(UTC)
+
+    def to_utc_ms(self, server_ms: npt.ArrayLike) -> npt.NDArray[np.int64]:
+        """Vectorised ``to_utc`` for epoch milliseconds (e.g. a tick array's ``time_msc``).
+
+        Exactly equal to ``to_utc`` per element: the offset can only change on a whole server
+        hour (DST switches happen at 02:00 New York, and the shift is whole hours), so it is
+        computed once per distinct server hour.
+        """
+        ms = np.asarray(server_ms, dtype=np.int64)
+        if ms.size == 0:
+            return ms.copy()
+        hours, inverse = np.unique(ms // _HOUR_MS, return_inverse=True)
+        offsets = np.array(
+            [h * _HOUR_MS - _epoch_ms(self.to_utc(h * 3600)) for h in hours.tolist()],
+            dtype=np.int64,
+        )
+        return ms - offsets[inverse.reshape(ms.shape)]
 
     def to_server_seconds(self, utc: datetime) -> float:
         """MT5 server timestamp (seconds) for a UTC instant, e.g. for ``copy_rates_range``."""
