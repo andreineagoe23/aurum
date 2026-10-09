@@ -1,5 +1,6 @@
 """``aurum`` command line. Commands for later phases exist as placeholders that exit with code 2."""
 
+import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NoReturn
@@ -301,9 +302,68 @@ def data_qa() -> None:
 
 
 @data_app.command("resample")
-def data_resample() -> None:
-    """Build canonical bars from ticks/M1."""
-    _not_yet("data resample", 2)
+def data_resample(
+    from_: Annotated[str | None, typer.Option("--from", help="YYYY-MM-DD UTC")] = None,
+    to: Annotated[
+        str | None, typer.Option(help="YYYY-MM-DD UTC, inclusive (default: yesterday)")
+    ] = None,
+) -> None:
+    """Normalize ticks and build canonical M1/M5/M15/H1 bars for complete UTC days, then
+    compare them with the broker's bars. Deterministic: re-runs give identical files."""
+    from aurum.data.pipeline import available_days, build_range
+    from aurum.data.summary import summarize_build
+
+    settings = _settings_or_exit()
+    configure_logging()
+    layout = DataLayout(settings.data_dir)
+    symbol, point = _stored_symbol_point(settings)
+    last = SystemClock().now().date() - timedelta(days=1)
+    lo = date.fromisoformat(from_) if from_ else date.min
+    hi = min(date.fromisoformat(to), last) if to else last
+    days = [d for d in available_days(layout, symbol) if lo <= d <= hi]
+    results = build_range(
+        layout,
+        symbol,
+        days,
+        point=point,
+        outlier_factor=settings.config.data.qa.spread_outlier_factor,
+    )
+    summary = summarize_build(results)
+    table = Table(title=f"canonical bars vs broker bars ({len(days)} days)")
+    for col in (
+        "source",
+        "tf",
+        "matched",
+        "only ours",
+        "only broker",
+        "OHLC differ",
+        "max diff pts",
+    ):
+        table.add_column(col)
+    for row in summary["comparisons"]:
+        table.add_row(
+            row["source"],
+            row["timeframe"],
+            str(row["matched"]),
+            str(row["only_canonical"]),
+            str(row["only_broker"]),
+            str(row["ohlc_mismatch"]),
+            str(max(row["max_diff_points"].values())),
+        )
+    console.print(table)
+    report = write_report(layout, "resample", {"symbol": symbol, **summary})
+    console.print(f"report: {report}")
+
+
+def _stored_symbol_point(settings: Settings) -> tuple[str, float]:
+    """The broker symbol and its point size from the newest spec snapshot (never hard-coded)."""
+    specs = settings.data_dir / "specs"
+    snapshots = sorted(specs.glob("*/*.json"), key=lambda p: p.name) if specs.is_dir() else []
+    if not snapshots:
+        console.print("[red]no spec snapshot yet: run `aurum mt5 symbols` or the collector[/red]")
+        raise typer.Exit(1)
+    spec = json.loads(snapshots[-1].read_text(encoding="utf-8"))["spec"]
+    return str(spec["name"]), float(spec["point"])
 
 
 # ---------------------------------------------------------------------------- research
