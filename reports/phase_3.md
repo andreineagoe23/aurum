@@ -1,5 +1,13 @@
 # Phase 3 report: event-driven simulator
 
+> **Addendum (2026-10-09, during Phase 4).** The Phase 4 full-history run found a bars-mode
+> case this report missed. A requested close (timeout, force-flat) arriving inside an M1 bar
+> that also reached the stop took the stop unflagged. If the bar reached the target instead,
+> it credited the target, which is optimistic. Fixed in 6c202cb (rule `close_bar`, ADR-0009),
+> with two new golden scenarios. Effect on §4: the reference strategy now has **1 worst-case
+> trade in 3,048** (2021-09-16; P&L unchanged). The parity window is unaffected (tick days):
+> the trades hash is still `c6bc07d2…`.
+
 - **Date:** 2026-10-09
 - **Exit gate:** **every item passed except the MT5 Strategy Tester parity check**, which is
   waiting for your tester run (§5). Phase 4 has not started.
