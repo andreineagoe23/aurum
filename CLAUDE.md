@@ -67,6 +67,16 @@ Its job is to tell the truth, not to make backtests look good.
   tick-built M1 equals the broker's M1 (`tick_fidelity = exact`); see `canonical_bars/days`.
 - Market hours, holidays and early closes live in `configs/data.yaml` (each with a reason);
   `aurum data qa --strict` must report 0 unexplained. Add future holidays before they happen.
+- Backtests (Phase 3): strategies see only a `MarketView` of bars closed by `now`; the runner
+  wakes at M5 closes, phase boundaries and `max_hold` deadlines; `SimBroker` fills on the first
+  quote at or after `now + latency`. Bar-only days use the worst-case intra-bar rule and flag the
+  trade (`intrabar_rule`, `worst_case`). Every `aurum backtest run` records a trial and writes
+  `reports/runs/<id>/` (git-ignored) with output hashes; reruns must be byte-identical
+  (`aurum backtest compare`).
+- Golden replay (`tests/replay/scenarios.py`): any change to an expected number needs a
+  stated reason in the commit; bugs become new scenarios. Hooks must be stateless.
+- Parity: `mql5/AurumReference.mq5` mirrors `reference_fixed_time`; compare with
+  `aurum backtest parity <run_id> <deals.csv>` (docs/strategies/reference_fixed_time.md).
 - On the VM, import `aurum` before `polars` (polars needs its compat runtime under emulation,
   `aurum/_platform.py`).
 

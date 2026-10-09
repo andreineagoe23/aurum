@@ -1,7 +1,10 @@
-"""Event-driven simulator with no future access.
+"""Event-driven simulator with no future access (Phase 3).
 
-TODO(Phase 3): chronological replay handing strategies data only up to "now".
-TODO(Phase 3): cost models (variable spread, commission, slippage, latency, rejection hooks).
-TODO(Phase 3): SimBroker (buy at ask, sell at bid, volume/stop-level rules, intra-bar SL/TP order).
-TODO(Phase 3): golden replay fixtures and MT5 Strategy Tester parity check.
+* ``market``: historical quotes per day, ticks on exact days and M1 bars otherwise (ADR-0007).
+* ``broker``: ``SimBroker`` implements ``BrokerPort`` (next-quote fills, costs, stops level,
+  worst-case intra-bar rule, rejection hooks).
+* ``runner``: chronological wake-ups driving the shared ``Engine``.
+* ``accounting``: per-trade cost attribution, equity curve and summary.
+* ``pipeline`` / ``storage``: ``aurum backtest run``, run manifest, trial ledger, outputs.
+* ``parity``: comparison with the MT5 Strategy Tester (``aurum backtest parity``).
 """
