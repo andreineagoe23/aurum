@@ -86,6 +86,7 @@ addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importli
 pythonpath = ["."]
 markers = [
     "mt5: needs Windows, the MetaTrader5 package and a running MT5 terminal (auto-skipped elsewhere)",
+    "mt5_orders: sends DEMO orders; also needs AURUM_MT5_ORDER_TESTS=1 (auto-skipped otherwise)",
 ]
 filterwarnings = ["error"]
 
