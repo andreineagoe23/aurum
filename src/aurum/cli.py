@@ -197,6 +197,51 @@ def mt5_bars(
 
 
 # ---------------------------------------------------------------------------- data (Phase 2)
+@data_app.command("depth")
+def data_depth() -> None:
+    """Measure how far back the broker serves bars and ticks, and re-fetch the oldest stored
+    tick day of each fidelity to see whether the server's copy has changed (ADR-0007)."""
+    from aurum.adapters.storage.parquet import read_parquet
+    from aurum.data.depth import measure_depth
+    from aurum.data.market_hours import MarketHours
+    from aurum.data.schemas import DAY_SOURCES
+
+    broker, settings = _connected_broker()
+    layout = DataLayout(settings.data_dir)
+    refetch: dict[date, int] = {}
+    try:
+        symbol = broker.resolve_symbol()
+        manifest_path = layout.day_manifest(symbol)
+        if manifest_path.exists():
+            days = read_parquet(manifest_path, DAY_SOURCES).drop_nulls("tick_fidelity")
+            for fidelity in ("incomplete", "exact"):
+                part = days.filter(pl.col("tick_fidelity") == fidelity).sort("day")
+                if part.height:
+                    refetch[part["day"][0]] = int(part["tick_rows"][0])
+        result = measure_depth(
+            broker,
+            symbol,
+            MarketHours(settings.config.data.market),
+            SystemClock().now(),
+            refetch_days=refetch,
+        )
+    finally:
+        broker.disconnect()
+    table = Table(title=f"history depth {symbol} (UTC)")
+    for col in ("data", "rows", "first", "continuous since"):
+        table.add_column(col)
+    for b in result.bars:
+        table.add_row(b.timeframe, str(b.bars), str(b.first_bar), str(b.continuous_since))
+    table.add_row("ticks", "-", str(result.first_tick), "-")
+    console.print(table)
+    for r in result.refetch:
+        console.print(
+            f"re-fetch {r['day']}: stored {r['stored_rows']} normalized rows, "
+            f"server now {r['server_rows_now']} raw rows"
+        )
+    console.print(f"report: {write_report(layout, 'depth', {'symbol': symbol, 'result': result})}")
+
+
 @data_app.command("backfill")
 def data_backfill(
     tf: Annotated[
