@@ -35,7 +35,14 @@ from aurum.adapters.mt5.servertime import (
     check_offset,
 )
 from aurum.core.clock import SystemClock
-from aurum.core.enums import AccountTradeMode, DealEntry, ExecutionStatus, OrderType, Side
+from aurum.core.enums import (
+    AccountTradeMode,
+    DealEntry,
+    DealReason,
+    ExecutionStatus,
+    OrderType,
+    Side,
+)
 from aurum.core.errors import (
     BrokerDisconnectedError,
     BrokerError,
@@ -495,7 +502,21 @@ class MT5Broker:
             commission=d.commission + d.fee,
             profit=d.profit + d.swap,
             idempotency_key=self._key(d.comment),
+            reason=self._deal_reason(d.reason),
         )
+
+    def _deal_reason(self, code: int) -> DealReason:
+        m = self._mt5
+        by_code = {
+            m.DEAL_REASON_EXPERT: DealReason.EXPERT,
+            m.DEAL_REASON_CLIENT: DealReason.MANUAL,
+            m.DEAL_REASON_MOBILE: DealReason.MANUAL,
+            m.DEAL_REASON_WEB: DealReason.MANUAL,
+            m.DEAL_REASON_SL: DealReason.STOP_LOSS,
+            m.DEAL_REASON_TP: DealReason.TAKE_PROFIT,
+            m.DEAL_REASON_SO: DealReason.STOP_OUT,
+        }
+        return by_code.get(code, DealReason.OTHER)
 
     def history_deals(self, start: datetime, end: datetime) -> list[DealRecord]:
         """Fills with ``start <= time < end`` (UTC). Non-trade deals (balance etc.) are omitted."""

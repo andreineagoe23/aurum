@@ -81,3 +81,31 @@ class DealEntry(StrEnum):
 
     IN = "IN"
     OUT = "OUT"
+
+
+class DealReason(StrEnum):
+    """Why the broker executed a deal (mirror of MT5 ``DEAL_REASON_*``)."""
+
+    EXPERT = "EXPERT"
+    """Requested through the API (Aurum's own orders and closes)."""
+    MANUAL = "MANUAL"
+    """Desktop terminal, mobile or web."""
+    STOP_LOSS = "STOP_LOSS"
+    TAKE_PROFIT = "TAKE_PROFIT"
+    STOP_OUT = "STOP_OUT"
+    OTHER = "OTHER"
+
+
+class ExitReason(StrEnum):
+    """Why a trade ended. STOP/TARGET are broker-side; the others are Aurum's own closes."""
+
+    STOP = "STOP"
+    TARGET = "TARGET"
+    INVALIDATION = "INVALIDATION"
+    """The strategy reported that the setup no longer holds."""
+    TIMEOUT = "TIMEOUT"
+    """The signal's ``max_hold`` elapsed."""
+    FORCE_FLAT = "FORCE_FLAT"
+    """Session cutoff (or market close minus buffer) reached with the position open."""
+    END_OF_DATA = "END_OF_DATA"
+    """A backtest ended with the position still open (should not happen with force-flat)."""

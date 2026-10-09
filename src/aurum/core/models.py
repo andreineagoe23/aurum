@@ -18,6 +18,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validato
 from aurum.core.enums import (
     AccountTradeMode,
     DealEntry,
+    DealReason,
     ExecutionStatus,
     OrderType,
     SessionPhase,
@@ -289,6 +290,8 @@ class DealRecord(DomainModel):
     """Signed, as the broker books it (costs are negative)."""
     profit: Money = 0.0
     idempotency_key: str | None = None
+    reason: DealReason | None = None
+    """Why the deal happened (stop loss, take profit, API request...), when the broker says."""
 
 
 # ------------------------------------------------------------------------------ decisions

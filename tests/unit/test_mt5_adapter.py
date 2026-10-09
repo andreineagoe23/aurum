@@ -11,7 +11,15 @@ from pydantic import SecretStr
 from aurum.adapters.mt5 import MT5Broker, is_available, load_mt5
 from aurum.adapters.mt5.servertime import OffsetCheck, ServerTimeZone
 from aurum.core.clock import ManualClock
-from aurum.core.enums import AccountTradeMode, DealEntry, ExecutionStatus, Mode, OrderType, Side
+from aurum.core.enums import (
+    AccountTradeMode,
+    DealEntry,
+    DealReason,
+    ExecutionStatus,
+    Mode,
+    OrderType,
+    Side,
+)
 from aurum.core.errors import (
     BrokerDisconnectedError,
     BrokerError,
@@ -319,6 +327,24 @@ def test_history_deals_skip_balance_entries(broker: MT5Broker, mt5: FakeMT5) -> 
     assert len(deals) == 1
     assert deals[0].entry is DealEntry.IN
     assert deals[0].time == NOW
+    assert deals[0].reason is DealReason.EXPERT
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        (f.DEAL_REASON_SL, DealReason.STOP_LOSS),
+        (f.DEAL_REASON_TP, DealReason.TAKE_PROFIT),
+        (f.DEAL_REASON_SO, DealReason.STOP_OUT),
+        (f.DEAL_REASON_MOBILE, DealReason.MANUAL),
+        (99, DealReason.OTHER),
+    ],
+)
+def test_deal_reason_mapped(broker: MT5Broker, mt5: FakeMT5, code: int, reason: DealReason) -> None:
+    broker.send_order(gold_intent())
+    mt5.deals[0].reason = code
+    (deal,) = broker.history_deals(NOW - timedelta(hours=1), NOW + timedelta(seconds=1))
+    assert deal.reason is reason
 
 
 # --------------------------------------------------------------------------- the guard
