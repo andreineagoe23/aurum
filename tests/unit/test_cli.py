@@ -127,7 +127,10 @@ def test_data_collect_runs_and_stops(fake_terminal: FakeMT5, tmp_path: Path) -> 
     assert not (tmp_path / "collector" / "STOP").exists()
 
 
-def test_data_backfill_writes_days_and_report(fake_terminal: FakeMT5, tmp_path: Path) -> None:
+def test_data_backfill_writes_days_and_report(
+    fake_terminal: FakeMT5, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("time.sleep", lambda _s: None)  # empty-day retries
     ms = fake_terminal.server_s(datetime(2026, 10, 7, 12, tzinfo=UTC)) * 1000
     fake_terminal.tick_rows = [{"time_msc": ms + i, "bid": 4142.7, "ask": 4142.8} for i in range(5)]
     args = ["data", "backfill", "--tf", "H1", "--from", "2026-10-06", "--to", "2026-10-07"]

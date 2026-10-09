@@ -66,14 +66,14 @@ class Backfiller:
         market: MarketHours,
         *,
         clock: ClockPort,
-        sleep: Callable[[float], None] = time.sleep,
+        sleep: Callable[[float], None] | None = None,
     ) -> None:
         self.source = source
         self.layout = layout
         self.cfg = cfg
         self.market = market
         self.clock = clock
-        self.sleep = sleep
+        self.sleep = sleep or time.sleep
 
     def last_complete_day(self) -> date:
         return self.clock.now().date() - timedelta(days=1)
