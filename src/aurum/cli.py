@@ -792,6 +792,63 @@ def backtest_compare(run_a: str, run_b: str) -> None:
         raise typer.Exit(1)
 
 
+@backtest_app.command("parity")
+def backtest_parity(
+    run_id: str,
+    tester_csv: Annotated[
+        Path, typer.Argument(help="Deals CSV written by mql5/AurumReference.mq5 (Common\\Files)")
+    ],
+    time_tolerance_ms: Annotated[int, typer.Option(help="Fill time tolerance")] = 1000,
+    price_tolerance_points: Annotated[float, typer.Option(help="Price tolerance")] = 1.0,
+    money_tolerance: Annotated[float, typer.Option(help="Profit/commission tolerance")] = 0.02,
+) -> None:
+    """Compare a run with the MT5 Strategy Tester's trades; exit 0 only if all are within
+    tolerance. Writes parity.csv and parity.json next to the run."""
+    from aurum.adapters.mt5.servertime import ServerTimeZone
+    from aurum.adapters.mt5.tester import read_tester_deals
+    from aurum.backtest.parity import Tolerance, compare, from_trades_frame
+    from aurum.backtest.storage import read_manifest, read_trades
+
+    settings = _settings_or_exit()
+    runs = _runs(settings)
+    st = settings.config.broker.server_time
+    try:
+        manifest = read_manifest(runs, run_id)
+        tester = read_tester_deals(tester_csv, ServerTimeZone(st.timezone, st.shift_hours))
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    report = compare(
+        from_trades_frame(read_trades(runs, run_id)),
+        tester,
+        point=float(manifest["spec"]["point"]),
+        tolerance=Tolerance(
+            time=timedelta(milliseconds=time_tolerance_ms),
+            price_points=price_tolerance_points,
+            money=money_tolerance,
+        ),
+        window=(date.fromisoformat(manifest["first"]), date.fromisoformat(manifest["last"])),
+    )
+    summary = {**report.summary(), "run_id": run_id, "tester_csv": str(tester_csv)}
+    report.frame().write_csv(runs.parity(run_id))
+    runs.parity_summary(run_id).write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+    )
+    table = Table(title=f"parity {run_id} vs MT5 Strategy Tester", show_header=False)
+    for key, value in summary.items():
+        table.add_row(key, str(value))
+    console.print(table)
+    for row in report.differing:
+        side = "aurum only" if row.tester is None else "tester only" if row.aurum is None else ""
+        what = side or "; ".join(
+            f"{d.name} {d.aurum} vs {d.tester} ({d.difference})" for d in row.diffs
+        )
+        console.print(f"{row.key[0]} {row.key[1]}: {what}")
+    console.print(f"details: {runs.parity(run_id)}")
+    if not report.ok:
+        raise typer.Exit(1)
+
+
 @validate_app.command("walkforward")
 def validate_walkforward(strategy: str) -> None:
     """Walk-forward validation."""

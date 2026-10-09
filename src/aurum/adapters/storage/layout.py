@@ -135,6 +135,13 @@ class RunLayout:
     def journal(self, run_id: str) -> Path:
         return self.run_dir(run_id) / "journal.parquet"
 
+    def parity(self, run_id: str) -> Path:
+        """Comparison with the MT5 Strategy Tester (``aurum backtest parity``), CSV."""
+        return self.run_dir(run_id) / "parity.csv"
+
+    def parity_summary(self, run_id: str) -> Path:
+        return self.run_dir(run_id) / "parity.json"
+
     def runs(self) -> list[str]:
         """Run ids with a manifest, oldest first (ids start with a UTC stamp)."""
         if not self.root.is_dir():
