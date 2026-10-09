@@ -22,6 +22,7 @@ from aurum.settings import Settings, load_settings
 
 if TYPE_CHECKING:
     from aurum.adapters.mt5 import MT5Broker
+    from aurum.data.qa import Gap
 
 app = typer.Typer(
     no_args_is_help=True, help="Aurum: intraday XAUUSD research platform (demo only)."
@@ -296,9 +297,105 @@ def data_collect(
 
 
 @data_app.command("qa")
-def data_qa() -> None:
-    """Data quality report."""
-    _not_yet("data qa", 2)
+def data_qa(
+    from_: Annotated[
+        str | None, typer.Option("--from", help="First trading date (default: bars_from)")
+    ] = None,
+    to: Annotated[str | None, typer.Option(help="Last trading date (default: yesterday)")] = None,
+    strict: Annotated[
+        bool, typer.Option(help="Exit 1 if anything unexplained is found (the exit gate)")
+    ] = False,
+) -> None:
+    """Data quality report: gaps in market hours and trading sessions, the daily break and
+    weekends, stale quotes, spread flags, live vs history ticks, collector journal."""
+    from aurum.data.market_hours import MarketHours
+    from aurum.data.qa import run_qa
+    from aurum.sessions.clock import SessionClock
+
+    settings = _settings_or_exit()
+    layout = DataLayout(settings.data_dir)
+    symbol, _ = _stored_symbol_point(settings)
+    data = settings.config.data
+    start = date.fromisoformat(from_) if from_ else data.backfill.bars_from
+    end = date.fromisoformat(to) if to else SystemClock().now().date() - timedelta(days=1)
+    result = run_qa(
+        layout,
+        symbol,
+        MarketHours(data.market),
+        SessionClock(settings.config.sessions),
+        start=start,
+        end=end,
+        stale_quote_seconds=settings.config.risk.stale_quote_seconds,
+        known_gaps=data.qa.known_gaps,
+    )
+    table = Table(title=f"data QA {symbol}: trading dates {start} .. {end}", show_header=False)
+    rows = [
+        ("trading dates", str(result.trading_dates)),
+        (
+            "closed dates (explained)",
+            ", ".join(f"{d} {r}" for d, r in result.closed_dates.items()) or "-",
+        ),
+        (
+            "early closes (explained)",
+            ", ".join(f"{d} {r}" for d, r in result.early_closes.items()) or "-",
+        ),
+        ("missing trading dates", _gap_list([str(d) for d in result.missing_days])),
+        ("gaps in trading sessions", _gap_list([_fmt_gap(g) for g in result.session_gaps])),
+        ("known source gaps in sessions", str(len(result.explained_session_gaps))),
+        ("gaps elsewhere in market hours", _gap_list([_fmt_gap(g) for g in result.market_gaps])),
+        ("bars outside market hours", _gap_list([_fmt_gap(g) for g in result.outside_hours])),
+        (
+            "ticks / crossed / spread outliers",
+            " / ".join(str(v) for v in result.tick_flags.values()),
+        ),
+        ("UNEXPLAINED", f"[{'red' if result.unexplained else 'green'}]{result.unexplained}[/]"),
+    ]
+    for fidelity, sessions in sorted(result.stale_quotes.items()):
+        for session, st in sorted(sessions.items()):
+            rows.append(
+                (
+                    f"stale > {settings.config.risk.stale_quote_seconds:g}s "
+                    f"({fidelity}, {session})",
+                    f"{st.intervals} intervals, longest {st.max_seconds:.1f}s",
+                )
+            )
+    for lv in result.live_vs_history:
+        rows.append(
+            (
+                f"live vs history {lv['day']}",
+                f"only live {lv['only_live']}, only history {lv['only_history']}",
+            )
+        )
+    rows.append(("collector events", str(result.collector["counts"])))
+    for name, value in rows:
+        table.add_row(name, value)
+    console.print(table)
+    report = write_report(
+        layout,
+        "qa",
+        {
+            "symbol": symbol,
+            "start": start,
+            "end": end,
+            "unexplained": result.unexplained,
+            "result": result,
+        },
+    )
+    console.print(f"report: {report}")
+    if strict and result.unexplained:
+        raise typer.Exit(1)
+
+
+def _fmt_gap(g: "Gap") -> str:
+    where = f" in {'+'.join(g.sessions)}" if g.sessions else ""
+    return f"{g.start:%Y-%m-%d %H:%M}..{g.end:%H:%M}Z ({g.minutes} min{where})"
+
+
+def _gap_list(items: list[str], limit: int = 12) -> str:
+    if not items:
+        return "none"
+    more = f" ... (+{len(items) - limit} more)" if len(items) > limit else ""
+    return f"{len(items)}: " + "; ".join(items[:limit]) + more
 
 
 @data_app.command("resample")

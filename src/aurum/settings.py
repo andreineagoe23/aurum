@@ -30,6 +30,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from aurum.core.enums import Mode
 from aurum.core.errors import ConfigError
+from aurum.core.timeutil import UtcDatetime
 
 WEEKDAYS: dict[str, int] = {"MON": 0, "TUE": 1, "WED": 2, "THU": 3, "FRI": 4, "SAT": 5, "SUN": 6}
 _HHMM = re.compile(r"^([01]\d|2[0-3]):([0-5]\d)$")
@@ -296,9 +297,24 @@ class CollectorConfig(_Config):
         return self
 
 
+class KnownGap(_Config):
+    """A gap inside the trading sessions that is in the broker's own history, with a reason."""
+
+    start: UtcDatetime
+    end: UtcDatetime
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.end <= self.start:
+            raise ValueError("known gap must end after it starts")
+        return self
+
+
 class QaConfig(_Config):
     spread_outlier_factor: float = Field(gt=1)
     spread_spike_factor: float = Field(gt=1)
+    known_gaps: list[KnownGap] = Field(default_factory=list)
 
 
 class DataConfig(_Config):
