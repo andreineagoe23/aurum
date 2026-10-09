@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, NoReturn
 from zoneinfo import ZoneInfo
 
+import polars as pl
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -465,6 +466,71 @@ def _stored_symbol_point(settings: Settings) -> tuple[str, float]:
         raise typer.Exit(1)
     spec = json.loads(snapshots[-1].read_text(encoding="utf-8"))["spec"]
     return str(spec["name"]), float(spec["point"])
+
+
+@data_app.command("spreads")
+def data_spreads(
+    fidelity: Annotated[
+        str, typer.Option(help="Tick days to use: exact, incomplete or all (ADR-0006)")
+    ] = "exact",
+) -> None:
+    """Spread statistics by session and at M5 decision instants; proposes
+    risk.max_spread_points (does not change risk.yaml)."""
+    from aurum.adapters.storage.parquet import read_parquet
+    from aurum.data.schemas import DAY_SOURCES
+    from aurum.data.spreads import CANDIDATE_CAPS, propose_max_spread, spread_stats
+    from aurum.sessions.clock import SessionClock
+
+    settings = _settings_or_exit()
+    layout = DataLayout(settings.data_dir)
+    symbol, _ = _stored_symbol_point(settings)
+    manifest = read_parquet(layout.day_manifest(symbol), DAY_SOURCES).drop_nulls("tick_fidelity")
+    if fidelity != "all":
+        manifest = manifest.filter(pl.col("tick_fidelity") == fidelity)
+    days = manifest["day"].to_list()
+    files = [layout.normalized_ticks(symbol, d) for d in days]
+    stats = spread_stats(
+        files,
+        SessionClock(settings.config.sessions),
+        days,
+        spike_factor=settings.config.data.qa.spread_spike_factor,
+    )
+    if not days:
+        console.print(f"no tick days with fidelity {fidelity}")
+        raise typer.Exit(1)
+    table = Table(
+        title=f"spread (points), {fidelity} tick days {stats['first_day']}..{stats['last_day']}"
+    )
+    for col in ("measure", "session", "n", "median", "p90", "p95", "p99", "p99.9", "max"):
+        table.add_column(col)
+    for measure, rows in (
+        ("per quote", stats["quote_weighted"]["by_session"]),
+        ("at M5 close", stats["at_decision_m5_close"]),
+    ):
+        for r in rows:
+            table.add_row(
+                measure,
+                r["session"],
+                str(r["n"]),
+                *(str(r[k]) for k in ("p50", "p90", "p95", "p99", "p99.9")),
+                str(r["max"]),
+            )
+    console.print(table)
+    blocked = stats["decisions_blocked_by_cap"]
+    console.print(
+        "share of M5 decision instants blocked by a cap: "
+        + ", ".join(f"{c}: {blocked[f'cap_{c}'] * 100:.2f}%" for c in CANDIDATE_CAPS)
+    )
+    proposal = propose_max_spread(stats)
+    if proposal is not None:
+        console.print(
+            f"[bold]proposed risk.max_spread_points = {proposal.max_spread_points}[/] "
+            f"({proposal.basis}). Not written to risk.yaml; DEMO stays disabled."
+        )
+    report = write_report(
+        layout, "spreads", {"symbol": symbol, "fidelity": fidelity, "proposal": proposal, **stats}
+    )
+    console.print(f"report: {report}")
 
 
 # ---------------------------------------------------------------------------- research

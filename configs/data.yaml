@@ -111,7 +111,7 @@ collector:
 qa:
   # A tick whose spread exceeds this multiple of its UTC day's median spread is an outlier.
   spread_outlier_factor: 5.0
-  # A minute whose maximum spread exceeds this multiple of its session's median is a spike.
+  # A minute whose mean spread exceeds this multiple of its session's median is a spike.
   spread_spike_factor: 3.0
   # Gaps inside the trading sessions that are in the broker's own history (its M1/M5/M15/H1
   # bars have no data there either, and canonical bars miss nothing the broker has). Each one
