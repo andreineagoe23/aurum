@@ -111,6 +111,9 @@ class BrokerConfig(_Config):
     """MT5 ``magic`` stamped on every Aurum order, so reconciliation can tell ours apart."""
     max_deviation_points: int = Field(default=50, ge=0)
     """Largest price deviation (points) accepted on a market order fill (MT5 ``deviation``)."""
+    max_intent_age_seconds: float = Field(default=60, gt=0, le=300)
+    """An ``OrderIntent`` older than this is never sent (an existing order with its key is
+    still recognised); a decision that waited out a disconnect must be re-made."""
 
 
 # ------------------------------------------------------------------------------ sessions.yaml
@@ -186,6 +189,50 @@ class SessionsConfig(_Config):
 # ------------------------------------------------------------------------------ risk.yaml
 
 
+class TimeWindow(_Config):
+    """A wall-clock window ``start <= t < end`` with the reason it exists."""
+
+    start: ClockTime
+    end: ClockTime
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.start >= self.end:
+            raise ValueError(f"window start {self.start} must be before end {self.end}")
+        return self
+
+
+class NewsBlackoutConfig(_Config):
+    """No new entries around high-impact US releases (open positions keep their stops).
+
+    ``daily_windows`` apply on every Monday-Friday in ``timezone``; ``fomc_window`` applies on
+    each date in ``fomc_decisions`` (statement dates, with a reason each). Add future FOMC
+    dates before they happen, like holidays in data.yaml.
+    """
+
+    timezone: str = "America/New_York"
+    daily_windows: list[TimeWindow] = Field(default_factory=list)
+    fomc_window: TimeWindow
+    fomc_decisions: dict[date, str] = Field(min_length=1)
+
+    @field_validator("timezone")
+    @classmethod
+    def _tz_exists(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown timezone {value!r}") from exc
+        return value
+
+    @field_validator("fomc_decisions")
+    @classmethod
+    def _reasons(cls, value: dict[date, str]) -> dict[date, str]:
+        if any(not reason.strip() for reason in value.values()):
+            raise ValueError("every FOMC date needs a reason")
+        return value
+
+
 class RiskConfig(_Config):
     """Provisional demo safety limits. Upper caps are hard sanity bounds, not targets."""
 
@@ -201,6 +248,9 @@ class RiskConfig(_Config):
     max_spread_atr_fraction: float = Field(gt=0, le=1.0)
     min_minutes_before_cutoff: int = Field(ge=0, le=240)
     stale_quote_seconds: float = Field(gt=0, le=60)
+    atr_period: int = Field(default=14, ge=2, le=100)
+    """M15 ATR period for ``max_spread_atr_fraction`` (Wilder smoothing, completed bars)."""
+    news_blackout: NewsBlackoutConfig
 
     @model_validator(mode="after")
     def _check(self) -> Self:

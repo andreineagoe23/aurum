@@ -35,3 +35,5 @@ server_time:
 magic_number: 7020261
 # Market orders: reject the fill if price moved more than this many points (50 = $0.50).
 max_deviation_points: 50
+# An OrderIntent older than this is never sent (owner, Phase 4): re-decide after a disconnect.
+max_intent_age_seconds: 60
