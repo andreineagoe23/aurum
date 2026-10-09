@@ -4,6 +4,7 @@ Times are written as "HH:MM:SS.fff" on a fixed UTC day so fixtures read like a t
 """
 
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 
 import numpy as np
@@ -12,10 +13,11 @@ import polars as pl
 from aurum.backtest.broker import SimBroker, SimCosts
 from aurum.backtest.market import HistoricalMarket, TickDay
 from aurum.core.clock import ManualClock
-from aurum.core.models import SymbolSpec
+from aurum.core.enums import OrderType, Side
+from aurum.core.models import PositionState, Signal, SymbolSpec
 from aurum.core.timeframes import Timeframe
 from aurum.data.schemas import CANONICAL_BARS, polars_schema
-from aurum.features.view import BarSeries, to_ms
+from aurum.features.view import BarSeries, MarketView, to_ms
 
 DAY = date(2026, 9, 15)  # a Tuesday: BST (London = UTC+1) and EDT (New York = UTC-4)
 
@@ -150,3 +152,72 @@ def sim(
     )
     broker.connect()
     return broker, clock
+
+
+# ------------------------------------------------------------------------------ strategies
+
+
+@dataclass(frozen=True)
+class Plan:
+    """One scripted entry: what to propose at a decision instant."""
+
+    side: Side
+    stop_loss: float
+    take_profit: float | None = None
+    max_hold: timedelta | None = None
+    entry_type: OrderType = OrderType.MARKET
+    entry_price: float | None = None
+
+
+@dataclass
+class ScriptedStrategy:
+    """Proposes ``plans[now]`` at decision instants and invalidates at ``invalidate[now]``.
+
+    Records every view it receives so tests can assert it never saw a bar closing after now.
+    """
+
+    plans: dict[datetime, Plan] = field(default_factory=dict)
+    invalidate: dict[datetime, str] = field(default_factory=dict)
+    timeframe: Timeframe = Timeframe.M5
+    seen: list[tuple[datetime, datetime | None]] = field(default_factory=list)
+    strategy_id: str = "scripted"
+
+    @property
+    def decision_timeframe(self) -> Timeframe:
+        return self.timeframe
+
+    def on_bar(self, view: MarketView) -> Signal | None:
+        self.seen.append((view.now, view.bars(Timeframe.M1).last_close_time))
+        plan = self.plans.get(view.now)
+        if plan is None:
+            return None
+        return Signal(
+            strategy_id=self.strategy_id,
+            symbol="XAUUSD",
+            side=plan.side,
+            time=view.now,
+            data_as_of=view.now,
+            entry_type=plan.entry_type,
+            entry_price=plan.entry_price,
+            stop_loss=plan.stop_loss,
+            take_profit=plan.take_profit,
+            max_hold=plan.max_hold,
+            reasons=("scripted",),
+        )
+
+    def invalidation(self, view: MarketView, position: PositionState, signal: Signal) -> str | None:
+        self.seen.append((view.now, view.bars(Timeframe.M1).last_close_time))
+        return self.invalidate.get(view.now)
+
+
+def flat_m1(
+    first: str, last: str, price: float = 2000.0, *, spread: int = 10, day: date = DAY
+) -> list[BarRow]:
+    """Quiet M1 bars (range +-0.10 around ``price``) for every minute from ``first`` to ``last``."""
+    start, end = at(first, day), at(last, day)
+    rows: list[BarRow] = []
+    t = start
+    while t <= end:
+        rows.append((t.strftime("%H:%M"), price, price + 0.10, price - 0.10, price, spread))
+        t += timedelta(minutes=1)
+    return rows

@@ -63,6 +63,8 @@ NO_BROKER_ACCESS = ("aurum.adapters", "aurum.execution", "aurum.apps", "aurum.po
         ("aurum.features", NO_BROKER_ACCESS),
         ("aurum.risk", ("aurum.adapters", "aurum.apps", "aurum.strategies")),
         ("aurum.backtest", ("aurum.adapters.mt5", "aurum.apps")),
+        # The engine is shared by BACKTEST/SHADOW/DEMO: it may not know about the simulator.
+        ("aurum.execution", ("aurum.adapters", "aurum.apps", "aurum.backtest")),
         ("aurum.sessions", ("aurum.adapters", "aurum.execution", "aurum.apps")),
     ],
 )
