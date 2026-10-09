@@ -12,6 +12,7 @@ from typing import Protocol
 
 from aurum.core.models import (
     AccountSnapshot,
+    DealRecord,
     OrderState,
     PositionState,
     RiskDecision,
@@ -36,6 +37,18 @@ class RiskContext:
     """Pending orders owned by Aurum."""
     quote: Tick | None
     """Latest quote with ``time <= now`` (None if there is none)."""
+    connected: bool = True
+    """The broker connection was up when the context was built."""
+    m15_atr: float | None = None
+    """ATR of completed M15 bars (price units), for the spread/ATR gate. None if unknown."""
+    deals: Sequence[DealRecord] = ()
+    """Aurum's own deals (magic and "AU" key) since ``week_start``, oldest first."""
+    day_start: datetime | None = None
+    """UTC start of the current London trading date."""
+    week_start: datetime | None = None
+    """UTC start of the Monday of the current London trading week."""
+    session_start: datetime | None = None
+    """UTC start of the session window ``now`` is in (consecutive-loss lockout scope)."""
 
 
 class RiskEngine(Protocol):
