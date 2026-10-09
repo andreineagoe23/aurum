@@ -222,3 +222,15 @@ def test_find_existing_locates_a_sell_position(broker: FakeBroker) -> None:
     found = m.find_existing(report.idempotency_key or "", T0 - timedelta(days=1), T0)
     assert found is not None
     assert found.position_id == report.position_id
+
+
+def test_stale_resubmit_of_a_pending_order_is_a_duplicate(broker: FakeBroker) -> None:
+    m = manager(broker)
+    sig = signal(stop_loss=1980.0, entry_type=OrderType.LIMIT, entry_price=1990.0)
+    placed = m.submit(intent_for(sig), sig, T0)
+    assert placed.status is ExecutionStatus.PLACED
+    assert m.store.get(placed.idempotency_key or "").status is IntentStatus.PLACED  # type: ignore[union-attr]
+    again = m.submit(intent_for(sig), sig, T0 + timedelta(minutes=2))
+    assert again.duplicate
+    assert (again.status, again.order_id) == (ExecutionStatus.PLACED, placed.order_id)
+    assert len(broker.sent_intents) == 1
