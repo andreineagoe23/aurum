@@ -1,9 +1,15 @@
 """Builders for domain objects used across tests."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from aurum.core.enums import OrderType, Side
 from aurum.core.models import OrderIntent, RiskDecision, Signal, Tick
+from aurum.core.timeframes import Timeframe
+
+if TYPE_CHECKING:
+    import polars as pl
 
 T0 = datetime(2026, 3, 30, 8, 0, tzinfo=UTC)
 
@@ -62,3 +68,43 @@ def reject(sig: Signal) -> RiskDecision:
 def intent(side: Side = Side.BUY, volume: float = 0.10, **kwargs: object) -> OrderIntent:
     sig = signal(side, **kwargs)  # type: ignore[arg-type]
     return OrderIntent.from_signal(sig, approve(sig, volume), created_at=sig.time)
+
+
+def canonical_bars(
+    timeframe: Timeframe,
+    open_times: Sequence[datetime],
+    closes: Sequence[float],
+    *,
+    spread_min: int | None = 5,
+    width: float = 0.5,
+) -> "pl.DataFrame":
+    """Canonical-bar rows (aurum.data.schemas.CANONICAL_BARS) with open = previous close (first:
+    close), high/low ``width`` beyond the body, and a constant minimum spread in points."""
+    import polars as pl
+
+    from aurum.data.schemas import CANONICAL_BARS, polars_schema
+
+    rows = []
+    prev = closes[0] if closes else 0.0
+    for t, c in zip(open_times, closes, strict=True):
+        o = prev
+        rows.append(
+            {
+                "open_time": t,
+                "close_time": t + timeframe.duration,
+                "open": o,
+                "high": max(o, c) + width,
+                "low": min(o, c) - width,
+                "close": c,
+                "tick_count": 10,
+                "quote_count": None,
+                "spread_open": None,
+                "spread_min": spread_min,
+                "spread_max": None,
+                "spread_mean": None,
+                "spread_close": None,
+                "source": "test",
+            }
+        )
+        prev = c
+    return pl.DataFrame(rows, schema=polars_schema(CANONICAL_BARS))
