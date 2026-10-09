@@ -1,0 +1,16 @@
+# Phase 3 reference strategy: exercises the simulator and the MT5 Strategy Tester parity check.
+# NOT a research strategy (no hypothesis, no edge by design). Spec: docs/strategies/reference_fixed_time.md
+name: reference_fixed_time
+family: reference
+enabled: false
+variants: [m15, m5]
+sessions: [london_morning, ldn_ny_overlap]
+spec: docs/strategies/reference_fixed_time.md
+params:
+  # UTC entry times (bar closes): 08:00 UTC is in london_morning and 14:30 UTC in ldn_ny_overlap
+  # in both summer and winter time. Distances in points from the decision bar's bid close.
+  # The morning trade usually ends at its stop, target or 2-hour timeout; the afternoon one
+  # has wide levels so it usually runs into the force-flat cutoff.
+  entries:
+    - {time_utc: "08:00", side: BUY, stop_points: 1000, target_points: 1500, max_hold_minutes: 120}
+    - {time_utc: "14:30", side: SELL, stop_points: 3000, target_points: 4500}
