@@ -22,6 +22,7 @@ from aurum.core.errors import (
 from aurum.core.models import OrderIntent
 from aurum.core.safety import LIVE_ACK_PHRASE
 from aurum.core.timeframes import Timeframe
+from aurum.data.schemas import RAW_BARS, RAW_TICKS
 from aurum.settings import AppConfig, EnvSettings, PromotionConfig, Settings
 from tests import fake_mt5 as f
 from tests.factories import intent
@@ -546,3 +547,49 @@ def test_symbol_snapshot_written(broker: MT5Broker, tmp_path: Path) -> None:
     assert '"filling_mode": 3' in path.read_text(encoding="utf-8")
     with pytest.raises(FileExistsError):
         write_symbol_snapshot(tmp_path, spec, {}, server="S")
+
+
+# --------------------------------------------------------------------------- raw frames
+
+
+def test_tick_frame_keeps_every_row_in_utc(broker: MT5Broker, mt5: FakeMT5) -> None:
+    t0 = NOW - timedelta(seconds=10)
+    ms = int(mt5.server_tz.to_server_seconds(t0) * 1000)
+    mt5.tick_rows = [
+        {"time_msc": ms + 5, "bid": 4142.0, "ask": 4142.1, "flags": 6},
+        {"time_msc": ms + 5, "bid": 0.0, "ask": 4142.1, "flags": 4},  # invalid, still kept
+        {"time_msc": ms + 2, "bid": 4141.9, "ask": 4142.0, "flags": 2},  # out of order, kept
+        {"time_msc": ms - 1, "bid": 4141.0, "ask": 4141.1},  # before start: dropped
+    ]
+    frame = broker.tick_frame("XAUUSD", t0, NOW)
+    assert frame.columns == RAW_TICKS.names
+    assert frame["time"].to_list() == [
+        t0 + timedelta(milliseconds=5),
+        t0 + timedelta(milliseconds=5),
+        t0 + timedelta(milliseconds=2),
+    ]
+    assert frame["bid"].to_list() == [4142.0, 0.0, 4141.9]
+    assert frame["flags"].to_list() == [6, 4, 2]
+
+
+def test_tick_frame_end_is_exclusive_and_ms_precise(broker: MT5Broker, mt5: FakeMT5) -> None:
+    t0 = NOW - timedelta(seconds=10)
+    ms = int(mt5.server_tz.to_server_seconds(t0) * 1000)
+    mt5.tick_rows = [{"time_msc": ms + i, "bid": 4142.0, "ask": 4142.1} for i in (0, 499, 500)]
+    frame = broker.tick_frame("XAUUSD", t0, t0 + timedelta(milliseconds=500))
+    assert frame.height == 2
+
+
+def test_tick_frame_ipc_failure_raises(broker: MT5Broker, mt5: FakeMT5) -> None:
+    mt5.fail_next_copies = 1
+    with pytest.raises(BrokerError, match="IPC send failed"):
+        broker.tick_frame("XAUUSD", NOW - timedelta(minutes=1), NOW)
+
+
+def test_rate_frame_completed_bars_only_in_utc(broker: MT5Broker, mt5: FakeMT5) -> None:
+    opens = [datetime(2026, 10, 8, 23, 0, tzinfo=UTC), datetime(2026, 10, 9, 0, 0, tzinfo=UTC)]
+    mt5.rates[f.TIMEFRAME_H1] = [_rate(mt5, t) for t in opens]  # 00:00 bar still forming
+    frame = broker.rate_frame("XAUUSD", Timeframe.H1, datetime(2026, 10, 8, tzinfo=UTC), NOW)
+    assert frame.columns == RAW_BARS.names
+    assert frame["open_time"].to_list() == [opens[0]]
+    assert frame["spread"].to_list() == [3]

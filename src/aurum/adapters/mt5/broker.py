@@ -23,8 +23,10 @@ from datetime import datetime, timedelta
 from types import ModuleType
 from typing import Any
 
+import polars as pl
 import structlog
 
+from aurum.adapters.mt5.frames import rates_to_frame, ticks_to_frame
 from aurum.adapters.mt5.loader import load_mt5
 from aurum.adapters.mt5.servertime import (
     OffsetCheck,
@@ -381,6 +383,40 @@ class MT5Broker:
         if skipped:
             log.warning("mt5.ticks_skipped", symbol=symbol, skipped=skipped, kept=len(ticks))
         return ticks
+
+    def tick_frame(self, symbol: str, start: datetime, end: datetime) -> pl.DataFrame:
+        """Raw ticks with ``start <= time < end`` (UTC, ms) as a ``RAW_TICKS`` frame: every row
+        the terminal returns (including invalid ones), in its order. For storage and QA."""
+        start, end = to_utc(start), to_utc(end)
+        self._select(symbol)
+        raw = self._mt5.copy_ticks_range(
+            symbol,
+            self._server_bound(start),
+            self._server_bound(end) + 1,
+            self._mt5.COPY_TICKS_ALL,
+        )
+        frame = ticks_to_frame(self._require(raw, f"copy_ticks_range({symbol})"), self.server_tz)
+        return frame.filter((pl.col("time") >= start) & (pl.col("time") < end))
+
+    def rate_frame(
+        self, symbol: str, timeframe: Timeframe, start: datetime, end: datetime
+    ) -> pl.DataFrame:
+        """Raw completed bars with ``start <= open_time < end`` (UTC) as a ``RAW_BARS`` frame."""
+        start, end = to_utc(start), to_utc(end)
+        self._select(symbol)
+        tf = getattr(self._mt5, timeframe.mt5_constant_name)
+        rates = self._mt5.copy_rates_range(
+            symbol, tf, self._server_bound(start), self._server_bound(end)
+        )
+        frame = rates_to_frame(
+            self._require(rates, f"copy_rates_range({symbol}, {timeframe})"), self.server_tz
+        )
+        last_open = self._clock.now() - timeframe.duration  # close_time <= now
+        return frame.filter(
+            (pl.col("open_time") >= start)
+            & (pl.col("open_time") < end)
+            & (pl.col("open_time") <= last_open)
+        )
 
     # ------------------------------------------------------------------ state
     @staticmethod

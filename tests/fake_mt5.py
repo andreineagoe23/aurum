@@ -16,6 +16,9 @@ from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
+import numpy as np
+
+from aurum.adapters.mt5.frames import RATE_DTYPE, TICK_DTYPE
 from aurum.adapters.mt5.servertime import ServerTimeZone
 
 # Constant values copied from MetaTrader5 5.0.6231.
@@ -37,6 +40,19 @@ TRADE_RETCODE_PLACED, TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL = 10008, 10
 TRADE_RETCODE_REQUOTE, TRADE_RETCODE_INVALID_STOPS = 10004, 10016
 
 MAX_COMMENT = 29
+TICK_DEFAULTS = {"last": 0.0, "volume": 0, "flags": 6, "volume_real": 0.0}
+
+
+def _structured(rows: list[dict[str, Any]], dtype: np.dtype) -> np.ndarray:
+    """Rows (dicts) as the numpy structured array the real terminal returns. Tick rows may omit
+    ``time`` (derived from ``time_msc``) and the always-zero CFD fields."""
+    out = np.zeros(len(rows), dtype=dtype)
+    for i, row in enumerate(rows):
+        full = {**TICK_DEFAULTS, **row} if dtype is TICK_DTYPE else dict(row)
+        if dtype is TICK_DTYPE:
+            full.setdefault("time", full["time_msc"] // 1000)
+        out[i] = tuple(full[name] for name in dtype.names)
+    return out
 
 
 @dataclass
@@ -55,6 +71,8 @@ class FakeMT5:
     reject_next: int | None = None
     drop_stops: bool = False
     connected: bool = True
+    fail_next_copies: int = 0
+    """The next N copy_* calls fail like a broken IPC link (None + error)."""
 
     rates: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
     tick_rows: list[dict[str, Any]] = field(default_factory=list)
@@ -169,11 +187,27 @@ class FakeMT5:
         )
 
     # ------------------------------------------------------------------ data
-    def copy_rates_range(self, symbol: str, tf: int, frm: int, to: int) -> list[dict[str, Any]]:
-        return [r for r in self.rates.get(tf, []) if frm <= r["time"] <= to]
+    def _ipc_ok(self) -> bool:
+        if self.fail_next_copies > 0:
+            self.fail_next_copies -= 1
+            self.error = (-10001, "IPC send failed")
+            return False
+        if not self._initialized:
+            self.error = (-10004, "No IPC connection")
+            return False
+        return True
 
-    def copy_ticks_range(self, symbol: str, frm: int, to: int, flags: int) -> list[dict[str, Any]]:
-        return [t for t in self.tick_rows if frm * 1000 <= t["time_msc"] <= to * 1000]
+    def copy_rates_range(self, symbol: str, tf: int, frm: int, to: int) -> np.ndarray | None:
+        if not self._ipc_ok():
+            return None
+        rows = [r for r in self.rates.get(tf, []) if frm <= r["time"] <= to]
+        return _structured(rows, RATE_DTYPE)
+
+    def copy_ticks_range(self, symbol: str, frm: int, to: int, flags: int) -> np.ndarray | None:
+        if not self._ipc_ok():
+            return None
+        rows = [t for t in self.tick_rows if frm * 1000 <= t["time_msc"] <= to * 1000]
+        return _structured(rows, TICK_DTYPE)
 
     # ------------------------------------------------------------------ state
     def positions_get(
