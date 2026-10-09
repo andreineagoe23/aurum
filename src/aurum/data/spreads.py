@@ -12,7 +12,7 @@ integer points (0.01 USD for a 2-digit XAUUSD).
   median, merged into events (consecutive minutes) and counted by London hour.
 
 Days are chosen by the caller. The proposal uses tick days of ``exact`` fidelity only, because
-thinned history (ADR-0006) can misstate spreads.
+thinned history (ADR-0007) can misstate spreads.
 """
 
 import math

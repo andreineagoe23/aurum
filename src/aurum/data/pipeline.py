@@ -8,7 +8,7 @@ For each day:
 2. If there are ticks: normalize -> ``normalized_ticks`` -> M1 from ticks, checked against the
    broker's M1. If they agree exactly (tick fidelity ``exact``) the tick-built M1 is canonical.
    If not (``incomplete``: the broker's stored tick history for that day is thinned or has
-   holes, ADR-0006), canonical M1 is the broker's M1 instead. Normalized ticks are kept either
+   holes, ADR-0007), canonical M1 is the broker's M1 instead. Normalized ticks are kept either
    way. Without ticks (before tick history began): canonical M1 from the broker's M1 bars.
 3. Canonical M5/M15/H1 from canonical M1, each compared with the broker's bars of that
    timeframe.
@@ -109,7 +109,7 @@ def build_day(
             result.tick_vs_broker = check
             if check.ohlc_mismatch or check.only_broker or check.only_canonical:
                 # The stored ticks do not reproduce the broker's own bars (thinned or holed
-                # tick history, ADR-0006): the broker's M1 is the better record of that day.
+                # tick history, ADR-0007): the broker's M1 is the better record of that day.
                 result.tick_fidelity = INCOMPLETE
                 m1, result.source = broker_m1_to_canonical(broker_m1), BROKER_M1_SOURCE
             else:

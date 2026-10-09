@@ -237,3 +237,49 @@ Also measured: `mt5.initialize()` works from the Remote-SSH session, so no deskt
 | `git push` fails with "could not read Username" | Run `gh auth setup-git` (7.5). |
 | uv hardlink / "failed to link" errors | Set `UV_LINK_MODE=copy` (script does this). |
 | "running scripts is disabled" / "not digitally signed" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then `Unblock-File` the script if it was downloaded. |
+| polars: `unknown feature flag: 'sse3'` or `Illegal instruction` | x64 Python under emulation has no AVX2. `aurum/_platform.py` selects polars' SSE4.2 "compat" runtime automatically; import `aurum` before `polars` in ad-hoc scripts, or set `POLARS_FORCE_PKG=compat` and `POLARS_SKIP_CPU_CHECK=1`. |
+
+## 13. Running the data collector (Phase 2)
+
+The tick collector should run whenever the terminal does. It survives terminal restarts,
+disconnects and VM sleep by itself (it re-fetches missed ticks from the terminal's history and
+records any gap in `C:\aurum-data\collector\XAUUSD\events.jsonl`).
+
+Start it by hand:
+
+```powershell
+cd C:\code\aurum
+uv run aurum data collect --log-file C:\aurum-data\logs\collector.jsonl
+```
+
+Stop it gracefully with Ctrl+C, or, for a detached run, by creating the STOP file:
+
+```powershell
+New-Item C:\aurum-data\collector\STOP -ItemType File
+```
+
+Health: `C:\aurum-data\collector\XAUUSD\heartbeat.json` is rewritten every minute (status,
+cursor, age of the last tick, whether the market is open).
+
+Run it at logon (Task Scheduler; restarts it if it ever exits):
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "C:\venvs\aurum\Scripts\aurum.exe" `
+  -Argument "data collect --log-file C:\aurum-data\logs\collector.jsonl" -WorkingDirectory "C:\code\aurum"
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) `
+  -RestartCount 9999 -RestartInterval (New-TimeSpan -Minutes 1)
+Register-ScheduledTask -TaskName "Aurum collector" -Action $action -Trigger $trigger -Settings $settings
+```
+
+Also put a shortcut to the MT5 terminal in the Startup folder (`shell:startup`) so the terminal
+is up after a reboot, and keep the VM from sleeping (section 9).
+
+Daily maintenance (backfill yesterday, rebuild canonical data, QA), after 00:15 UTC:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+  -Argument "-NoProfile -File C:\code\aurum\scripts\daily_data.ps1" -WorkingDirectory "C:\code\aurum"
+$trigger = New-ScheduledTaskTrigger -Daily -At "02:30"   # local VM time; pick a time after 00:15 UTC
+Register-ScheduledTask -TaskName "Aurum daily data" -Action $action -Trigger $trigger
+```

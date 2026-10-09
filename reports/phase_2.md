@@ -53,5 +53,5 @@ The Python API cannot trigger it.
   placeholder bars are not research data and are not backfilled.
 - **Ticks: from 2026-03-29**, the earliest tick the server has.
 - Minute history (≈5.9 years) meets the ~2–3 year research threshold. **Tick history
-  (≈6.3 months) does not.** See ADR-0007 (proposed, not implemented) for a separate,
+  (≈6.3 months) does not.** See ADR-0008 (proposed, not implemented) for a separate,
   clearly labelled Dukascopy tick source.

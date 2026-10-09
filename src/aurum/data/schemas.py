@@ -96,7 +96,7 @@ DAY_SOURCES = pa.schema(
     ]
 )
 """One row per UTC day built by aurum.data.pipeline: where its canonical bars came from and
-whether its stored ticks reproduce the broker's M1 (``tick_fidelity``, ADR-0006)."""
+whether its stored ticks reproduce the broker's M1 (``tick_fidelity``, ADR-0007)."""
 
 
 def polars_schema(schema: pa.Schema) -> pl.Schema:

@@ -43,7 +43,7 @@ Its job is to tell the truth, not to make backtests look good.
   `broker.magic_number`. Dedup searches positions, pending orders and opening history orders.
   ADR-0005.
 - Units in names/docstrings: *price* (USD/oz), *points* (× `SymbolSpec.point`), *lots*, *money*
-  (account ccy, read from the broker: `broker.account_currency: auto`; the demo is GBP).
+  (account ccy, read from the broker; `broker.account_currency: USD` refuses any other account).
   Commission on deals is negative.
 - Models: pydantic v2, `frozen=True`, `extra="forbid"`, invariants in `model_validator`.
 - Config: YAML in `configs/`, validated in `aurum/settings.py`, unknown keys are errors,
@@ -59,6 +59,16 @@ Its job is to tell the truth, not to make backtests look good.
   `mt5_orders` and need `AURUM_MT5_ORDER_TESTS=1`.
 - Unimplemented CLI commands exit with code 2 and name their phase.
 - Dependencies: add only when used, with a one-line reason in `pyproject.toml`.
+- Data (Phase 2, ADR-0006/0007): one Parquet file per symbol and UTC date under
+  `AURUM_DATA_DIR`; schemas only in `aurum.data.schemas`, paths only in
+  `aurum.adapters.storage.layout`. Raw is immutable (`write_parquet(..., overwrite=False)`),
+  derived data is rebuilt deterministically (sort before grouping, integer sums for means) and
+  checked with `aurum data hashes --compare`. Canonical bars come from ticks only on days whose
+  tick-built M1 equals the broker's M1 (`tick_fidelity = exact`); see `canonical_bars/days`.
+- Market hours, holidays and early closes live in `configs/data.yaml` (each with a reason);
+  `aurum data qa --strict` must report 0 unexplained. Add future holidays before they happen.
+- On the VM, import `aurum` before `polars` (polars needs its compat runtime under emulation,
+  `aurum/_platform.py`).
 
 ## How to work (MASTER_PROMPT §9)
 

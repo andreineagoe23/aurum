@@ -471,7 +471,7 @@ def _stored_symbol_point(settings: Settings) -> tuple[str, float]:
 @data_app.command("spreads")
 def data_spreads(
     fidelity: Annotated[
-        str, typer.Option(help="Tick days to use: exact, incomplete or all (ADR-0006)")
+        str, typer.Option(help="Tick days to use: exact, incomplete or all (ADR-0007)")
     ] = "exact",
 ) -> None:
     """Spread statistics by session and at M5 decision instants; proposes

@@ -12,7 +12,7 @@ Checks, all on stored data (no broker access):
   16:59-18:00 New York (= server 23:59-01:00), weekends, and closed dates.
 * **Stale quotes.** On tick days, every interval without a tick longer than
   ``risk.stale_quote_seconds`` inside a trading session, split by tick fidelity (thinned history
-  overstates staleness, ADR-0006).
+  overstates staleness, ADR-0007).
 * **Spread flags.** Counts of crossed and outlier-spread ticks.
 * **Live vs history.** For days where the collector and the history backfill both have ticks:
   rows only one side has, compared on (time, bid, ask). Flags differ by design.

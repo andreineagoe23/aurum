@@ -1,6 +1,6 @@
-# Data Dictionary (Phase 0)
+# Data Dictionary
 
-Authoritative definitions: `src/aurum/core/models.py`, `enums.py`, `timeframes.py`, `timeutil.py`. The tables below mirror the code field by field; if they disagree, the code wins and this document must be fixed. The column-level Parquet schemas are completed in Phase 2.
+Authoritative definitions: `src/aurum/core/models.py`, `enums.py`, `timeframes.py`, `timeutil.py`. The tables below mirror the code field by field; if they disagree, the code wins and this document must be fixed. Stored datasets (Phase 2) are defined in `src/aurum/data/schemas.py` and described in [Stored datasets](#stored-datasets-phase-2) below.
 
 ## Conventions
 
@@ -10,11 +10,11 @@ Authoritative definitions: `src/aurum/core/models.py`, `enums.py`, `timeframes.p
 - **Points**: multiples of the symbol's `point`. For a 2-digit XAUUSD symbol, `point = 0.01` USD, so 1 point = 0.01 USD and 1.00 USD = 100 points.
 - **Volume**: lots. `Lots` type: float, `> 0`, no inf/NaN. Constrained by `volume_min`, `volume_max`, `volume_step` from the broker.
 - **Contract size**: taken from the broker `SymbolSpec` (typically 100 oz per lot). Never hard-coded.
-- **Money** (P&L, commission, equity, balance): account currency, USD. `Money` type: float, no inf/NaN, may be negative.
+- **Money** (P&L, commission, equity, balance): account currency, read from the broker (the demo account is USD; `broker.account_currency: USD` refuses any other). `Money` type: float, no inf/NaN, may be negative.
 - **Models**: Pydantic v2, frozen (immutable), extra fields forbidden.
 - **Buys are priced at ask, sells at bid.** Closing a BUY uses bid, closing a SELL uses ask.
 - **Symbol names**: string, length 1 to 32.
-- **Idempotency key**: string matching `^[A-Za-z0-9_-]{8,31}$` (fits the 31-char MT5 order comment).
+- **Idempotency key**: string matching `^[A-Za-z0-9_-]{8,29}$` (the MetaTrader5 Python API refuses comments over 29 characters, ADR-0005).
 
 ## Enums
 
@@ -248,7 +248,7 @@ An order ready for a broker; construction enforces the safety invariants.
 
 | Field | Type | Unit | Meaning / constraints |
 |---|---|---|---|
-| `idempotency_key` | str | | Pattern `^[A-Za-z0-9_-]{8,31}$`. Sent as the MT5 order comment. |
+| `idempotency_key` | str | | Pattern `^[A-Za-z0-9_-]{8,29}$`. Sent as the MT5 order comment. |
 | `symbol` | str | | |
 | `side` | Side | | |
 | `order_type` | OrderType | | |
@@ -314,15 +314,139 @@ One immutable row of the trial ledger (every backtest/parameter trial, good or b
 | `sealed_test_opened` | bool | | Default False. |
 | `record_hash` | str | | Required; integrity hash of the record. Computed by the trial ledger, not by the model (no validator in `models.py`). |
 
-## Storage layout (Phase 2)
+## Stored datasets (Phase 2)
 
-TODO(Phase 2): confirm schemas, partitioning and file naming. Planned folders under `AURUM_DATA_DIR`, partitioned by symbol/date:
+Authoritative schemas: `src/aurum/data/schemas.py`. Paths: `src/aurum/adapters/storage/layout.py`.
+Storage rules: ADR-0006. Bar source and tick fidelity: ADR-0007.
 
-- `raw_ticks/` (immutable)
-- `raw_broker_bars/` (immutable)
-- `normalized_ticks/`
-- `canonical_bars/{M1,M5,M15,H1}/`
-- `features/`
-- `quality_reports/`
+### Common rules
 
-Also TODO(Phase 2): normalisation rules (dedupe, out-of-order, negative or extreme spreads, stale quotes), resampling rules ticks -> M1 -> M5/M15/H1, and spread statistics by session.
+- Everything lives under `AURUM_DATA_DIR` (Windows default `C:\aurum-data`, macOS `./data`).
+- **Partitioning:** one Parquet file per symbol and **UTC** date (`YYYY-MM-DD.parquet`). The
+  symbol is the broker's name, discovered at runtime (`XAUUSD` on Fusion).
+- **Time columns:** `timestamp[ms, UTC]`, true UTC. MT5 server time (New York + 7h) is converted
+  in the MT5 adapter before anything is stored (ADR-0004).
+- **Prices:** USD per troy ounce, `float64`. **Spreads:** integer points (`round((ask − bid) /
+  point)`, point = 0.01 USD). **Bars:** bid OHLC, keyed by open time, covering
+  `[open_time, close_time)`, usable only from `close_time`.
+- **Immutable** (never rewritten): `raw_ticks/`, `raw_broker_bars/`, `specs/`, `quality_reports/`,
+  `collector/<symbol>/events.jsonl`. **Rebuilt** deterministically by `aurum data resample`:
+  `normalized_ticks/`, `canonical_bars/`.
+- **Parquet writer:** pyarrow, zstd level 9, dictionary on, statistics on, format 2.6. Identical
+  rows give identical bytes (`aurum data hashes`).
+
+| Path | Written by | Contents | Mutability |
+|---|---|---|---|
+| `raw_ticks/mt5_history/<symbol>/<date>.parquet` | `aurum data backfill` | Broker tick history for one complete UTC day | immutable (empty → data allowed with `--refetch-empty`) |
+| `raw_ticks/mt5_live/<symbol>/<date>/<first_ms>_<last_ms>_<rows>.parquet` | `aurum data collect` | Live-collected ticks, one chunk per flush and UTC date | immutable, append-only |
+| `raw_broker_bars/mt5/<symbol>/<tf>/<date>.parquet` | `aurum data backfill` | Broker bars (M1/M5/M15/H1), completed bars of one UTC day | immutable |
+| `normalized_ticks/<symbol>/<date>.parquet` | `aurum data resample` | Cleaned ticks with spread and flags | rebuilt |
+| `canonical_bars/<tf>/<symbol>/<date>.parquet` | `aurum data resample` | Canonical M1/M5/M15/H1 bars | rebuilt |
+| `canonical_bars/days/<symbol>.parquet` | `aurum data resample` | One row per UTC day: bar source, tick fidelity | rebuilt (merged) |
+| `features/` | Phase 5 | reserved | – |
+| `quality_reports/<name>/<UTC stamp>.json` | backfill, resample, qa, spreads, hashes | One JSON report per run | immutable |
+| `collector/<symbol>/events.jsonl` | collector | Journal: started, connected, gap, outage, pause, disconnected, stopped … | append-only |
+| `collector/<symbol>/heartbeat.json` | collector | Latest heartbeat (status, cursor, last tick age) | replaced each minute |
+| `collector/STOP` | the owner | Create it to stop a running collector gracefully | deleted on stop |
+| `specs/<symbol>/<UTC stamp>.json` | collector, `aurum mt5 symbols` | `symbol_info` snapshot: on every connect if the contract changed, and once per UTC day | immutable |
+| `logs/*.jsonl` | `--log-file` | structlog JSON lines | append-only |
+
+### `raw_ticks` (RAW_TICKS)
+
+Rows exactly as `copy_ticks_range(COPY_TICKS_ALL)` returned them, in received order. Nothing is
+dropped or reordered.
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `time` | timestamp[ms, UTC] | UTC | Quote time: MT5 `time_msc` converted from server clock |
+| `bid` | float64 | price | Bid |
+| `ask` | float64 | price | Ask |
+| `last` | float64 | price | Last trade price; always 0 for this CFD |
+| `volume` | uint64 | | Always 0 for this CFD |
+| `flags` | uint32 | bit set | MT5 `TICK_FLAG_*`: 2 = bid changed, 4 = ask changed. History ticks also carry 128 (undocumented) on bid changes, so history uses 4/130/134 and live uses 2/4/6 |
+| `volume_real` | float64 | | Always 0 for this CFD |
+
+### `raw_broker_bars` (RAW_BARS)
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `open_time` | timestamp[ms, UTC] | UTC | Bar open (converted from server clock) |
+| `open`, `high`, `low`, `close` | float64 | price | Bid OHLC |
+| `tick_volume` | uint64 | ticks | Bid-changing ticks in the bar (measured: equals ticks with flag bit 2) |
+| `spread` | int32 | points | **Minimum** spread in the bar (measured, ADR-0007), not the average |
+| `real_volume` | uint64 | | Always 0 for this CFD |
+
+### `normalized_ticks` (NORMALIZED_TICKS)
+
+Built from `raw_ticks/mt5_history` if the day exists there, else from the live chunks.
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `time` | timestamp[ms, UTC] | UTC | Sorted ascending; same-millisecond rows keep their received order |
+| `bid`, `ask` | float64 | price | Both > 0 and finite (invalid rows dropped) |
+| `spread_points` | int32 | points | `round((ask − bid) / point)` |
+| `flags` | uint32 | bit set | As in raw |
+| `crossed` | bool | | `ask < bid` (kept, flagged) |
+| `spread_outlier` | bool | | Spread > `qa.spread_outlier_factor` (5) × the UTC day's median spread |
+| `source` | string | | `mt5_history` or `mt5_live` |
+
+Normalisation rules, in order: drop rows without a positive finite bid and ask; count
+out-of-order rows and sort stably by time; drop **consecutive** exact duplicates (all raw fields
+equal to the previous row); compute spread; flag crossed and outlier spreads. Measured on 39.9M
+Fusion ticks: 0 invalid, 0 out of order, 0 consecutive duplicates, 0 crossed, 133,638 outliers.
+Non-adjacent identical rows in the same millisecond (A, B, A) are real quote flicker and kept.
+
+### `canonical_bars` (CANONICAL_BARS)
+
+| Column | Type | Unit | Meaning |
+|---|---|---|---|
+| `open_time` | timestamp[ms, UTC] | UTC | Bar open; aligned to the timeframe |
+| `close_time` | timestamp[ms, UTC] | UTC | `open_time + duration`: the first instant the bar may be used. Join higher timeframes as-of on this column |
+| `open`, `high`, `low`, `close` | float64 | price | Bid OHLC |
+| `tick_count` | int64 | ticks | Bid-changing ticks (MT5 `tick_volume` convention) |
+| `quote_count` | int64, nullable | ticks | All ticks (bid or ask changed); weight of `spread_mean`. Null when built from broker M1 |
+| `spread_open`, `spread_close` | int32, nullable | points | Spread of the first / last tick. Null from broker M1 |
+| `spread_min` | int32 | points | Minimum spread (from broker M1: the broker's `spread`) |
+| `spread_max` | int32, nullable | points | Maximum spread. Null from broker M1 |
+| `spread_mean` | float64, nullable | points | Quote-weighted mean spread (exact integer sum / count). Null from broker M1 |
+| `source` | string | | `mt5_history` / `mt5_live` (built from ticks) or `mt5_bars_m1` (from the broker's M1) |
+
+Construction: M1 from ticks when the day's tick-built M1 equals the broker's M1 exactly, else
+from the broker's M1 (ADR-0007). M5/M15/H1 always from canonical M1: first open, max high,
+min low, last close, summed counts, min/max of spread extremes, quote-weighted mean. Bars exist
+only for minutes with ticks (like MT5). Every canonical bar equals the broker's bar at the same
+timeframe (verified over 2,157 days by `aurum data resample`).
+
+### `canonical_bars/days` (DAY_SOURCES)
+
+| Column | Type | Meaning |
+|---|---|---|
+| `day` | date32 | UTC date |
+| `m1_source` | string, nullable | Source of that day's canonical bars; null = no data (holiday, weekend) |
+| `tick_source` | string, nullable | `mt5_history` / `mt5_live` if the day has ticks |
+| `tick_rows` | int64, nullable | Normalized ticks kept |
+| `tick_fidelity` | string, nullable | `exact` (tick M1 = broker M1), `incomplete` (it is not: thinned history), `unverified` (no broker M1) |
+| `tick_m1_mismatch` | int64, nullable | Minutes whose OHLC from ticks differs from the broker's |
+| `broker_only_minutes` | int64, nullable | Broker minutes with no ticks |
+| `tick_only_minutes` | int64, nullable | Tick minutes the broker has no bar for |
+
+### Market hours and data QA
+
+`configs/data.yaml` `market` (validated in `settings.py`, used by `aurum.data.market_hours`):
+trading date D runs 18:00 New York on D−1 to 16:59 New York on D (measured: last tick 16:58:5x,
+first tick 18:00:00–18:01:00), Monday–Friday. `closed_dates` and `early_closes` (each with a
+reason) were measured from the broker's M1 history and matched to US exchange holidays. QA
+(`aurum data qa`) expects an M1 bar for every minute of every session, after a 2-minute opening
+grace. It reports gaps inside the trading sessions (London/NY windows from sessions.yaml) and
+missing trading dates as unexplained unless covered by `qa.known_gaps` (each with a reason). It
+also reports gaps elsewhere in market hours, any bar outside market hours (daily break
+16:59–18:00 New York = server 23:59–01:00, weekends, closed dates), stale quotes (no tick for
+more than `risk.stale_quote_seconds` inside a session) and live-vs-history differences.
+
+### Spread statistics
+
+`aurum data spreads` (DuckDB over `normalized_ticks`) reports quote-weighted spread
+distributions per session, all market hours and London hour; the spread in force at every M5
+close inside a session ("decision-time"); and news-like spikes (minutes whose mean spread
+exceeds `qa.spread_spike_factor` × the session median). By default it uses tick days of `exact`
+fidelity only.
