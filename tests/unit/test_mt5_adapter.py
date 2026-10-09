@@ -152,13 +152,27 @@ def test_connect_gives_up_after_attempts(
         make_broker(settings, mt5, clock).connect()
 
 
-def test_account_currency_auto_accepts_gbp(broker: MT5Broker) -> None:
-    assert broker.account_info().currency == "GBP"
+def test_configured_account_currency_is_usd(app_config: AppConfig) -> None:
+    assert app_config.broker.account_currency == "USD"
+
+
+def test_account_currency_matching_expectation_connects(broker: MT5Broker) -> None:
+    assert broker.account_info().currency == "USD"
+
+
+def test_account_currency_auto_accepts_any(
+    app_config: AppConfig, mt5: FakeMT5, clock: ManualClock
+) -> None:
+    mt5.currency = "GBP"
+    b = make_broker(make_settings(app_config, account_currency="auto"), mt5, clock)
+    b.connect()
+    assert b.account_info().currency == "GBP"
 
 
 def test_account_currency_expectation_enforced(
     app_config: AppConfig, mt5: FakeMT5, clock: ManualClock
 ) -> None:
+    mt5.currency = "GBP"
     b = make_broker(make_settings(app_config, account_currency="USD"), mt5, clock)
     with pytest.raises(BrokerError, match=r"GBP but configs/broker.yaml expects USD"):
         b.connect()

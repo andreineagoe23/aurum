@@ -4,7 +4,7 @@ Units used throughout (see docs/DATA_DICTIONARY.md):
 
 * **price**: quote currency per unit (USD per troy oz for XAUUSD).
 * **points**: multiples of ``SymbolSpec.point`` (0.01 for a 2-digit XAUUSD).
-* **volume**: lots. **money**: account currency (read from the broker; the demo is GBP).
+* **volume**: lots. **money**: account currency (read from the broker; the demo is USD).
 * **time**: timezone-aware UTC. Bars are keyed by open time and visible only at close time.
 """
 

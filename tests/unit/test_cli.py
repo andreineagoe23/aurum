@@ -72,7 +72,7 @@ def test_mt5_ping(fake_terminal: FakeMT5) -> None:
     result = runner.invoke(app, ["mt5", "ping"])
     assert result.exit_code == 0, result.output
     assert "DEMO" in result.output
-    assert "GBP" in result.output
+    assert "USD" in result.output
     assert "VERIFIED" in result.output
     assert "UTC+3.00h" in result.output
 

@@ -2,9 +2,9 @@
 # Live gating lives in promotion.yaml + environment, never here.
 name: fusion_markets_zero
 account_type: zero
-# auto = take the currency the connected account reports (the demo is GBP).
-# Set a code (e.g. GBP) to make connecting to an account in another currency an error.
-account_currency: auto
+# The demo account is USD. An explicit code makes connecting to an account in any other
+# currency an error (`auto` would accept whatever the connected account reports).
+account_currency: USD
 
 # The broker's exact gold symbol is discovered at runtime (`aurum mt5 symbols --find gold`).
 # Candidates are tried in order; the first one the terminal knows wins.

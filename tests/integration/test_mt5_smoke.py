@@ -67,7 +67,7 @@ def require_open_market(broker: MT5Broker) -> None:
 def test_ping_is_demo(broker: MT5Broker) -> None:
     account = broker.account_info()
     assert account.is_demo
-    assert account.currency  # auto-detected (GBP on the Phase 1 demo)
+    assert account.currency == "USD"  # enforced by broker.account_currency on connect
 
 
 @pytest.mark.mt5

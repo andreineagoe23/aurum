@@ -44,7 +44,7 @@ class FakeMT5:
     now: Callable[[], datetime]
     """True UTC "now" (the test clock)."""
     trade_mode: int = ACCOUNT_TRADE_MODE_DEMO
-    currency: str = "GBP"
+    currency: str = "USD"
     bid: float = 4142.71
     ask: float = 4142.76
     quote_age: timedelta = timedelta(0)
@@ -130,7 +130,7 @@ class FakeMT5:
             "digits": 2,
             "point": 0.01,
             "trade_tick_size": 0.01,
-            "trade_tick_value": 0.7557,
+            "trade_tick_value": 1.0,
             "trade_contract_size": 100.0,
             "volume_min": 0.01,
             "volume_max": 100.0,
