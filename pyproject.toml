@@ -6,8 +6,8 @@ readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }
 authors = [{ name = "Andrei Neagoe" }]
-# Sprint 1 subset only. Data stack (polars, pyarrow, duckdb, numpy, pandas) arrives in Phase 2
-# when it is first used; ML/dashboard libraries much later.
+# Added only when used. pandas is not needed (MetaTrader5 returns numpy arrays). ML/dashboard
+# libraries much later.
 dependencies = [
     "pydantic>=2.8",          # domain models + config validation
     "pydantic-settings>=2.4", # .env / environment loading
@@ -17,6 +17,13 @@ dependencies = [
     "structlog>=24.1",        # JSON structured logs
     "tzdata>=2024.1",         # IANA tz database for zoneinfo on Windows (no system tzdb there)
     "MetaTrader5>=5.0.45; sys_platform == 'win32'",
+    "polars>=2.0",            # tick normalisation + resampling (columnar, deterministic, fast)
+    # x64 Python on Windows ARM runs emulated without AVX: polars must use its SSE4.2 "compat"
+    # build there (selected in aurum/_platform.py).
+    "polars[rtcompat]>=2.0; sys_platform == 'win32'",
+    "pyarrow>=17",            # Parquet writer with fixed options -> byte-identical re-runs
+    "duckdb>=1.1",            # SQL over many Parquet partitions (QA, spread statistics)
+    "numpy>=1.26",            # MetaTrader5 returns numpy structured arrays; fake terminal too
 ]
 
 [project.scripts]
