@@ -311,6 +311,55 @@ MIN_STOP = Scenario(
     journal=(("order_rejected", "invalid stops: stop_loss 3.00 from price, stops level 5.00"),),
 )
 
+# ------------------------------------------------------------- close and a level in one bar
+# Regression (found 2026-10-09 in the full-history run, 2021-09-16): a timeout close arriving
+# inside an M1 bar that also reaches a level. Before the fix the whole bar was processed first:
+# a stop was taken unflagged, and a target was credited although the close at the open almost
+# certainly came first (optimistic). Now: stop first and flagged; target not credited, flagged.
+CLOSE_BAR_PLAN = {
+    at("08:00"): Plan(Side.BUY, 1999.00, take_profit=2000.40, max_hold=timedelta(minutes=5))
+}
+
+
+def _close_bar(name: str, bar: BarRow, expected: dict[str, Any]) -> Scenario:
+    return Scenario(
+        name=name,
+        build=bars_only([*flat_m1("07:55", "08:04"), bar, *flat_m1("08:06", "08:30")]),
+        plans=CLOSE_BAR_PLAN,
+        expected=[
+            {
+                "entry_time": at("08:00:00.200"),
+                "entry_price": 2000.17,  # open 2000.00 + spread 0.12 + 0.05
+                "entry_mode": "bars",
+                "intrabar_rule": "close_bar",
+                "worst_case": True,
+                **expected,
+            }
+        ],
+    )
+
+
+CLOSE_BAR_STOP = _close_bar(
+    "timeout_close_and_stop_in_one_bar",
+    ("08:05", 2000.00, 2000.20, 1998.50, 1999.80, 10),  # reaches the 1999.00 stop
+    {
+        "exit_time": at("08:05:59.999"),
+        "exit_price": 1998.95,  # stop assumed first: 1999.00 - 0.05
+        "exit_reason": "STOP",
+        "net_pnl": -25.30,  # (1998.95 - 2000.17) x 20 = -24.40, - 0.90
+    },
+)
+CLOSE_BAR_TARGET = _close_bar(
+    "timeout_close_and_target_in_one_bar",
+    ("08:05", 2000.00, 2000.50, 1999.90, 2000.30, 10),  # reaches the 2000.40 target
+    {
+        "exit_time": at("08:05:00.200"),
+        "exit_price": 1999.95,  # closed at the open 2000.00 - 0.05; target not credited
+        "exit_reason": "TIMEOUT",
+        "net_pnl": -5.30,  # (1999.95 - 2000.17) x 20 = -4.40, - 0.90
+    },
+)
+
 SCENARIOS = [
     GAP_TICKS,
     GAP_BARS,
@@ -323,4 +372,6 @@ SCENARIOS = [
     DAILY_BREAK,
     REJECTED_ORDER,
     MIN_STOP,
+    CLOSE_BAR_STOP,
+    CLOSE_BAR_TARGET,
 ]

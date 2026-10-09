@@ -208,6 +208,7 @@ def summarize(
         "worst_case_share": round(worst / n, 4) if n else None,
         "intrabar_sl_tp_same_bar": rules.get(str(IntrabarRule.SL_TP_SAME_BAR), 0),
         "intrabar_entry_bar": rules.get(str(IntrabarRule.ENTRY_BAR), 0),
+        "intrabar_close_bar": rules.get(str(IntrabarRule.CLOSE_BAR), 0),
     }
     for reason in ExitReason:
         out[f"exit_{reason.value.lower()}"] = reasons.get(str(reason), 0)

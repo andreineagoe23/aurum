@@ -643,6 +643,7 @@ _SUMMARY_ROWS = (
     ("worst-case intra-bar trades", ("worst_case_trades", "worst_case_share")),
     ("  stop+target same bar", "intrabar_sl_tp_same_bar"),
     ("  entry+exit same bar", "intrabar_entry_bar"),
+    ("  close+level same bar", "intrabar_close_bar"),
     (
         "exits stop/target/inval/timeout/flat/eod",
         (

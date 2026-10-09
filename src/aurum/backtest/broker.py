@@ -19,6 +19,10 @@ Execution model (all prices USD/oz, volumes lots, money account currency):
   bar leaves the order of entry and exit unknown within that bar: the stop is assumed to
   follow the entry, a target counts only when it must have followed it, and the trade is
   flagged ``ENTRY_BAR`` whenever that assumption decided anything.
+* **Closes on bars.** A requested close fills at the open of the bar it arrives in. If that
+  bar also reaches the stop (after the open), the stop is assumed first; if it reaches only
+  the target, the close is assumed first and the target is not credited. Either way the trade
+  is flagged ``CLOSE_BAR``. A bar that opens through the stop is a gap: STOP, not flagged.
 * **Costs.** Commission ``commission_per_lot_side x volume`` on every fill, rounded to cents and
   booked negative (like the broker's deals). Profit is booked rounded to cents.
 * **Rules.** Volume min/max/step, stops level (minimum SL/TP and pending distance) and freeze
@@ -83,6 +87,9 @@ class IntrabarRule(StrEnum):
     """Stop and target both inside one M1 bar: stop assumed first (worst case)."""
     ENTRY_BAR = "entry_bar"
     """A pending entry filled inside a bar that also reached the stop or the target."""
+    CLOSE_BAR = "close_bar"
+    """A requested close arrived inside a bar that also reached the stop (stop assumed first)
+    or the target (close at the open assumed first, the target not credited)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -505,10 +512,20 @@ class SimBroker:
             return self._failed(now, "no quote", key=pos.key)
         if position_id not in self._book.positions:  # stopped out before the close arrived
             return self._failed(now, f"position {position_id} already closed", key=pos.key)
+        rule = IntrabarRule.NONE
+        if q.mode is DataMode.BARS:
+            level_exit, rule = self._close_bar_levels(pos, q)
+            if level_exit is not None:
+                self._close(pos, level_exit)
+                return self._failed(
+                    now,
+                    f"position {position_id} already closed (stop in the same bar)",
+                    key=pos.key,
+                )
         mark = q.bid if pos.side is Side.BUY else q.ask
         price = mark - pos.side.sign * self._slip
         best, worst = self._extremes(pos.side, pos.best, pos.worst, mark)
-        exit_ = _Exit(q.time_ms, price, q.bid, q.ask, q.mode, DealReason.EXPERT, best, worst)
+        exit_ = _Exit(q.time_ms, price, q.bid, q.ask, q.mode, DealReason.EXPERT, best, worst, rule)
         deal = self._close(pos, exit_)
         return ExecutionReport(
             status=ExecutionStatus.CLOSED,
@@ -633,14 +650,49 @@ class SimBroker:
         )
 
     def _arrival_quote(self, now: datetime) -> Quote | None:
-        """Quote an action requested at ``now`` executes on; processes the market up to it."""
+        """Quote an action requested at ``now`` executes on; processes the market up to it.
+
+        BARS: only up to the open of the arrival bar. What happens inside that bar is decided
+        by the caller (``_close_bar_levels``), never assumed in the strategy's favour.
+        """
         arrival = to_ms(now + self._costs.latency)
         if self._hours is not None and not self._hours.is_open(from_ms(arrival)):
             return None
         q = self._market.next_quote(arrival, arrival + self._max_wait_ms())
         if q is not None:
-            self._advance(q.time_ms)
+            if q.mode is DataMode.BARS:
+                self._advance(int(self._market.m1.open_time[q.index]))
+            else:
+                self._advance(q.time_ms)
         return q
+
+    def _close_bar_levels(self, pos: _Position, q: Quote) -> tuple[_Exit | None, IntrabarRule]:
+        """A close arriving in bar ``q.index`` (BARS): the stop if the bar opens through it or
+        reaches it (worst case), else None (close at the open) and whether the bar reached the
+        target (then the close-first assumption decided the outcome)."""
+        open_ms = int(self._market.m1.open_time[q.index])
+        seg = next(iter(self._market.segments(open_ms, open_ms + 1)), None)
+        if not isinstance(seg, BarSegment):
+            return None, IntrabarRule.NONE
+        side = pos.side
+        add = 0.0 if side is Side.BUY else float(seg.spread[0])
+        o, lo, hi = float(seg.open[0]) + add, float(seg.low[0]) + add, float(seg.high[0]) + add
+        adverse, favourable = (lo, hi) if side is Side.BUY else (hi, lo)
+        spread = float(seg.spread[0])
+        if (o - pos.sl) * side.sign <= 0:  # gap through the stop at the open: certain
+            gap = self._bar_exit(
+                pos, o, spread, open_ms, DealReason.STOP_LOSS, IntrabarRule.NONE, stop=True
+            )
+            return gap, IntrabarRule.NONE
+        if (adverse - pos.sl) * side.sign <= 0:
+            t = int(seg.close_time[0]) - 1
+            stop = self._bar_exit(
+                pos, pos.sl, spread, t, DealReason.STOP_LOSS, IntrabarRule.CLOSE_BAR, stop=True
+            )
+            return stop, IntrabarRule.CLOSE_BAR
+        if pos.tp is not None and (favourable - pos.tp) * side.sign >= 0:
+            return None, IntrabarRule.CLOSE_BAR
+        return None, IntrabarRule.NONE
 
     def _max_wait_ms(self) -> int:
         return int(self._costs.max_quote_wait / timedelta(milliseconds=1))
