@@ -6,40 +6,41 @@ Practical guide to get the MT5 side of Aurum running. Demo account only.
 
 | Where | Responsibilities |
 |---|---|
-| Mac (macOS, M4) | Cursor, Git, code editing, unit tests, backtests, notebooks, strategy/risk logic. Python 3.12 via uv, venv in `.venv`. Setup: `scripts/mac_setup.sh`. |
-| Windows 11 ARM64 VM | MT5 terminal (Fusion Markets), x64 Python 3.12 (emulated), `MetaTrader5` package, collector, shadow runner, demo trader. Setup: `scripts/windows_setup.ps1`. |
+| Mac (macOS, M4) | Cursor as the editor UI, connected to the VM over Remote-SSH (host `aurum-vm`). Optionally a second clone for Mac-only work (`scripts/mac_setup.sh`, venv in `.venv`). |
+| Windows 11 ARM64 VM | The working repo, MT5 terminal (Fusion Markets), x64 Python 3.12 (emulated), `MetaTrader5` package, tests, collector, shadow runner, demo trader. Setup: `scripts/windows_setup.ps1`. |
 
-Only `aurum/adapters/mt5/` imports `MetaTrader5`, lazily, so everything else runs on the Mac.
+Only `aurum/adapters/mt5/` imports `MetaTrader5`, lazily, so everything else also runs on the Mac.
 
-## 2. VMware Fusion shared folder
+Actual layout inside the VM:
 
-1. Install VMware Tools in the VM (required for shared folders).
-2. Shut down or keep the VM running, then: VM Settings -> Sharing -> enable Shared Folders.
-3. Add the repo folder (on the Mac this may be `~/code/aurum` or wherever you cloned it), access **Read & Write**.
-4. In the VM it appears as `\\vmware-host\Shared Folders\aurum`.
-5. Map it to a drive letter (PowerShell or cmd):
+| What | Path |
+|---|---|
+| Repo (git clone; edited via Cursor Remote-SSH) | `C:\code\aurum` |
+| Virtual environment (`UV_PROJECT_ENVIRONMENT`) | `C:\venvs\aurum` |
+| Market data (`AURUM_DATA_DIR`) | `C:\aurum-data` |
 
-   ```powershell
-   net use Z: "\\vmware-host\Shared Folders" /persistent:yes
-   ```
+## 2. No shared folder: clone inside the VM
 
-   The repo is then `Z:\aurum`.
+VMware Fusion does **not** support shared folders for Windows 11 ARM guests, so `\\vmware-host\Shared Folders` is not available. Instead, clone the repo inside the VM and edit it from the Mac over Remote-SSH (section 7):
 
-Warnings:
+```powershell
+git clone <repo-url> C:\code\aurum
+```
 
-- **Never put venvs or data on the share.** Use `C:\venvs\aurum` and `C:\aurum-data` (the setup script does this).
-- Line endings are handled by `.gitattributes`. With the shared-folder setup, run `git` on the Mac side only.
+Run `git` inside the VM, against `C:\code\aurum` (from the Cursor Remote-SSH terminal or a local PowerShell). Line endings are handled by `.gitattributes`.
 
 ## 3. Python x64 on Windows ARM64
 
 The `MetaTrader5` wheels are `win_amd64` only; there is no ARM64 wheel. Windows 11 on ARM runs x64 programs under emulation, so we install **x64** Python. `scripts/windows_setup.ps1` forces this through uv with the request `cpython-3.12-windows-x86_64-none`.
 
-Check:
+Check with `sysconfig.get_platform()`, which reports the platform the interpreter was built for:
 
 ```powershell
-& C:\venvs\aurum\Scripts\python.exe -c "import platform; print(platform.machine())"
-# AMD64  (ARM64 means the wrong interpreter was picked)
+& C:\venvs\aurum\Scripts\python.exe -c "import sysconfig; print(sysconfig.get_platform())"
+# win-amd64  (win-arm64 means the wrong interpreter was picked)
 ```
+
+Do **not** use `platform.machine()` for this: on Windows ARM it returns `ARM64` even for emulated x64 Python, because it reports the host CPU. `aurum doctor` and the setup script both use `sysconfig.get_platform()`.
 
 ## 4. MT5 terminal
 
@@ -55,7 +56,7 @@ Check:
 ## 5. Credentials
 
 ```powershell
-Copy-Item .env.example .env   # the setup script does this if .env is missing
+Copy-Item C:\code\aurum\.env.example C:\code\aurum\.env   # the setup script does this if .env is missing
 ```
 
 Fill `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER` (demo). Never commit `.env`, never log these values.
@@ -64,13 +65,16 @@ Fill `MT5_LOGIN`, `MT5_PASSWORD`, `MT5_SERVER` (demo). Never commit `.env`, neve
 
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-Unblock-File Z:\aurum\scripts\windows_setup.ps1   # scripts on a network share may need this
-Z:\aurum\scripts\windows_setup.ps1                # add -SkipTests to skip pytest
+C:\code\aurum\scripts\windows_setup.ps1   # add -SkipTests to skip pytest
 ```
 
-It installs uv and x64 Python, creates the venv at `C:\venvs\aurum`, persists `UV_PROJECT_ENVIRONMENT`, `UV_PYTHON`, `UV_LINK_MODE=copy` and `AURUM_DATA_DIR` for your user, verifies AMD64 and `import MetaTrader5`, then runs `aurum doctor`, tests and `aurum mt5 ping`. In Phase 0, `mt5 ping` is a placeholder that exits with code 2; the script treats that as a warning.
+It installs uv and x64 Python, creates the venv at `C:\venvs\aurum`, persists `UV_PROJECT_ENVIRONMENT`, `UV_PYTHON`, `UV_LINK_MODE=copy` and `AURUM_DATA_DIR` (`C:\aurum-data`) for your user, verifies `win-amd64` and `import MetaTrader5`, then runs `aurum doctor`, tests and `aurum mt5 ping`. In Phase 0, `mt5 ping` is a placeholder that exits with code 2; the script treats that as a warning.
 
-## 7. OpenSSH Server + Cursor Remote-SSH (optional)
+Open a new terminal (or reconnect Remote-SSH) afterwards so the persisted environment variables are picked up.
+
+## 7. OpenSSH Server + Cursor Remote-SSH
+
+### 7.1 sshd in the VM
 
 In an elevated PowerShell in the VM:
 
@@ -80,7 +84,7 @@ Start-Service sshd
 Set-Service -Name sshd -StartupType Automatic
 New-NetFirewallRule -Name sshd-private -DisplayName "OpenSSH Server (Private)" `
   -Direction Inbound -Protocol TCP -LocalPort 22 -Action Allow -Profile Private
-# optional: PowerShell as default shell
+# PowerShell as default shell
 New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell `
   -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force
 ```
@@ -89,7 +93,9 @@ If the network profile is Public, switch it to Private (Settings -> Network) rat
 
 Find the VM IP with `ipconfig` (VMware NAT, typically 192.168.x.x or 172.16.x.x).
 
-On the Mac, `~/.ssh/config`:
+### 7.2 SSH config on the Mac
+
+`~/.ssh/config`:
 
 ```
 Host aurum-vm
@@ -107,9 +113,40 @@ Key auth: copy `~/.ssh/id_ed25519.pub` to the VM.
   icacls.exe "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
   ```
 
-Then in Cursor: Remote-SSH -> Connect to Host -> `aurum-vm`.
+Check from a Mac terminal: `ssh aurum-vm` should land in PowerShell without a password prompt.
 
-**Choose one workflow and stick to it:** shared folder, Remote-SSH, or git-sync. With Remote-SSH, clone the repo inside the VM (`git clone ... C:\code\aurum`) and open that, not the shared folder. Run `scripts\windows_setup.ps1` from that clone.
+### 7.3 Cursor settings
+
+The first connection is slow (x64 emulation, server install), and Cursor's default connect timeout is too short. In Cursor's **user** settings on the Mac (`settings.json`):
+
+```json
+{
+  "remote.SSH.connectTimeout": 120
+}
+```
+
+Then: Remote-SSH -> Connect to Host -> `aurum-vm`, and open the folder `C:\code\aurum`.
+
+### 7.4 Workaround: install the Cursor server manually
+
+If the automatic server install keeps failing or timing out (the remote side downloads and unpacks the Cursor server inside the VM), install it by hand:
+
+1. On the Mac, find Cursor's **commit id**: Cursor -> About Cursor (the "Commit" line).
+2. Download the Cursor server (remote extension host) archive for that exact commit and the VM's platform, e.g. on the Mac, and copy it to the VM with `scp <archive> aurum-vm:`.
+3. In the VM, remove any half-installed copy and extract the archive into the directory Cursor expects:
+
+   ```powershell
+   $Commit = '<commit-id>'
+   $Dest = "$env:USERPROFILE\.cursor-server\bin\$Commit"
+   Remove-Item -Recurse -Force $Dest -ErrorAction SilentlyContinue
+   New-Item -ItemType Directory -Force -Path $Dest | Out-Null
+   tar -xzf "$env:USERPROFILE\<archive>" -C $Dest --strip-components 1
+   ```
+
+   The server's entry files (e.g. `node.exe`, `bin\`) must sit directly under `$Dest`, not in a nested folder.
+4. Reconnect from Cursor. It finds the server for its commit and skips the download.
+
+Repeat after every Cursor update: the commit id changes, so the server directory does too. Old `bin\<commit>` directories can be deleted.
 
 ## 8. Firewall and network
 
@@ -131,8 +168,9 @@ MT5 Python `copy_rates_*` / `copy_ticks_*` return epoch seconds that are express
 
 ## 11. Verification checklist
 
+- [ ] `ssh aurum-vm` works with key auth; Cursor opens `C:\code\aurum` over Remote-SSH
 - [ ] `uv run aurum doctor` reports all OK
-- [ ] Interpreter reports `AMD64`
+- [ ] Interpreter reports `win-amd64` (`sysconfig.get_platform()`)
 - [ ] `python -c "import MetaTrader5; print(MetaTrader5.__version__)"` works in the venv
 - [ ] MT5 terminal running, logged in to demo, Algo Trading green
 - [ ] `uv run aurum mt5 ping` succeeds (Phase 1; exit code 2 placeholder in Phase 0)
@@ -142,8 +180,10 @@ MT5 Python `copy_rates_*` / `copy_ticks_*` return epoch seconds that are express
 
 | Symptom | Cause / fix |
 |---|---|
-| `platform.machine()` prints `ARM64`, or `MetaTrader5` fails to install | ARM64 Python picked. Delete `C:\venvs\aurum`, ensure `UV_PYTHON=cpython-3.12-windows-x86_64-none`, re-run the setup script. |
+| `sysconfig.get_platform()` prints `win-arm64`, or `MetaTrader5` fails to install | ARM64 Python picked. Delete `C:\venvs\aurum`, ensure `UV_PYTHON=cpython-3.12-windows-x86_64-none`, re-run the setup script. |
+| `platform.machine()` prints `ARM64` although the venv is x64 | Expected on Windows ARM; it reports the host CPU. Use `sysconfig.get_platform()`. |
 | `IPC initialize failed` | Terminal not running or not logged in, Algo Trading disabled, or wrong `MT5_PATH` when several terminals are installed. |
-| Shared folder not visible | VMware Tools missing or not running; Sharing not enabled in VM Settings; `net use` mapping not made. |
-| uv hardlink / "failed to link" errors | Set `UV_LINK_MODE=copy` (script does this). Make sure the venv is not on the share. |
-| "running scripts is disabled" / "not digitally signed" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then `Unblock-File` the script. |
+| Cursor Remote-SSH times out / "Could not establish connection" | Raise `remote.SSH.connectTimeout` (7.3). If the server install itself fails, install it manually (7.4). |
+| Cursor connects after an update but hangs on "Installing server" | New commit id; repeat 7.4 for the new commit. |
+| uv hardlink / "failed to link" errors | Set `UV_LINK_MODE=copy` (script does this). |
+| "running scripts is disabled" / "not digitally signed" | `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, then `Unblock-File` the script if it was downloaded. |
