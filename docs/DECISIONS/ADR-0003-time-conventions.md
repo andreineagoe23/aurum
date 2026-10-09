@@ -18,10 +18,9 @@
    delivered before their data exists.
 6. Session times are London wall-clock and converted per date (ADR-0002).
 
-## Open issue (Phase 1)
+## MT5 server time (resolved in Phase 1)
 
-MASTER_PROMPT says MT5 returns UTC seconds. In practice the MetaTrader5 Python API returns
-epoch seconds in the **trade server's time zone** (Fusion Markets servers are commonly
-GMT+2/GMT+3 following US DST). Phase 1 must measure the offset (latest tick time vs. system UTC)
-across a DST boundary and convert in the MT5 adapter before any data leaves it. Until verified,
-no MT5 timestamp may be stored.
+MASTER_PROMPT says MT5 returns UTC seconds. It does not: the MetaTrader5 Python API speaks the
+trade server's wall clock. Fusion Markets runs **New York + 7h** (UTC+2 / UTC+3 following US
+DST). The MT5 adapter converts every timestamp and query bound; see
+[ADR-0004](ADR-0004-mt5-server-time.md).

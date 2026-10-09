@@ -200,9 +200,17 @@ A drifting VM clock breaks stale-quote checks.
 - Disable sleep/hibernate in the VM: `powercfg /change standby-timeout-ac 0` (and `hibernate-timeout-ac 0`). Also keep the Mac awake during sessions (e.g. `caffeinate -d` or Energy settings).
 - Set Windows Update active hours to cover 06:00-21:00 London time.
 
-## 10. Known pitfall: MT5 timestamps (to be verified in Phase 1)
+## 10. MT5 timestamps are server time (measured in Phase 1)
 
-MT5 Python `copy_rates_*` / `copy_ticks_*` return epoch seconds that are expressed in the **trade server's time zone** (Fusion Markets servers are commonly GMT+2 / GMT+3 with US DST), not true UTC, despite what the docs imply. Phase 1 must measure the offset (compare the latest tick time to system UTC) and convert before storing anything. Until verified, do not trust MT5 times as UTC.
+The MetaTrader5 Python API returns, and accepts, epoch seconds in the **trade server's wall clock**, not UTC. Fusion Markets runs **New York + 7h**: UTC+3 in US summer time, UTC+2 in US winter time. `MT5Broker` converts everything to UTC (ADR-0004), and `aurum mt5 ping` shows the check:
+
+```
+server clock | VERIFIED: expected UTC+3.00h, measured UTC+3.00h
+```
+
+`STALE_QUOTE` (market closed) is harmless. `MISMATCH` means the configured rule is wrong, or the VM clock is off: check `w32tm /query /status` first.
+
+Also measured: `mt5.initialize()` works from the Remote-SSH session, so no desktop PowerShell is needed.
 
 ## 11. Verification checklist
 
@@ -211,8 +219,10 @@ MT5 Python `copy_rates_*` / `copy_ticks_*` return epoch seconds that are express
 - [ ] Interpreter reports `win-amd64` (`sysconfig.get_platform()`)
 - [ ] `python -c "import MetaTrader5; print(MetaTrader5.__version__)"` works in the venv
 - [ ] MT5 terminal running, logged in to demo, Algo Trading green
-- [ ] `uv run aurum mt5 ping` succeeds (Phase 1; exit code 2 placeholder in Phase 0)
-- [ ] `uv run pytest -m mt5` passes (integration tests, Phase 1+)
+- [ ] `uv run aurum mt5 ping` shows DEMO and `server clock VERIFIED` (market hours)
+- [ ] `uv run aurum mt5 symbols --find gold` writes a snapshot to `C:\aurum-data\specs\`
+- [ ] `uv run pytest -m mt5` passes (read-only integration tests)
+- [ ] Demo order tests, run deliberately: `$env:AURUM_MT5_ORDER_TESTS = "1"; uv run pytest -m mt5_orders` (min volume, closes what it opens)
 
 ## 12. Troubleshooting
 

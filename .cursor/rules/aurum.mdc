@@ -33,6 +33,7 @@ Full spec: `docs/MASTER_PROMPT.md`. Working conventions: `CLAUDE.md`. Read both 
 - Tests with the code; `uv run ruff check && uv run mypy && uv run pytest` must be green.
 - Type hints everywhere; docstrings state units (price/points/lots/money) and time semantics (open vs close, UTC).
 - Aware UTC datetimes only; inject `ClockPort` instead of calling `datetime.now`.
+- MT5 times are server wall clock (New York + 7h): convert only via `aurum.adapters.mt5.servertime` (ADR-0004). Idempotency key = MT5 order comment, max 29 chars (ADR-0005).
 - `MetaTrader5` imported only inside functions in `aurum/adapters/mt5/`.
 - Ask when ambiguity affects trading logic, risk or data correctness. Too-good results → suspect a leak.
 - Never add a dependency without stating why.

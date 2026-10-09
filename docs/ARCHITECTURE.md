@@ -42,7 +42,9 @@ MarketEvent ─► │ Feature pipeline (H1 regime │ M15 setup │ M5 trigger,
 
 - `fake.broker.FakeBroker`: in-memory, deterministic fills at bid (sells) and ask (buys).
 - `mt5.loader`: `is_available()` and lazy `load_mt5()`.
-- `mt5.broker.MT5Broker`: the only place `MetaTrader5` is imported, and only inside functions. Every write operation re-reads `account_info` and runs the safety guard first. Real MT5 calls arrive in Phase 1.
+- `mt5.broker.MT5Broker`: the only place `MetaTrader5` is imported, and only inside functions. Connect with retry/backoff; UTC bars, ticks, positions, orders and deals; guarded send/modify/close/cancel. Every write re-reads `account_info` and runs the safety guard first. Idempotency uses the order comment ([ADR-0005](DECISIONS/ADR-0005-idempotency-via-order-comment.md)).
+- `mt5.servertime`: the only server-clock ↔ UTC conversion (New York + 7h, [ADR-0004](DECISIONS/ADR-0004-mt5-server-time.md)), plus the offset check run on every connect.
+- `mt5.snapshot`: immutable symbol-spec snapshots in `<data_dir>/specs/<symbol>/`.
 - `storage`: Parquet/DuckDB store (Phase 2).
 
 ### Other packages
@@ -86,7 +88,7 @@ Enforced by `tests/unit/test_architecture.py`:
 - UTC everywhere internally; London time is used only to define sessions.
 - Bars are keyed by open time and visible at close time (`open + timeframe`).
 - Higher timeframes join lower ones with an as-of join on close time.
-- Details and the open MT5 server-time issue: [ADR-0003](DECISIONS/ADR-0003-time-conventions.md).
+- Details: [ADR-0003](DECISIONS/ADR-0003-time-conventions.md). The MT5 server clock (New York + 7h) is converted inside the adapter: [ADR-0004](DECISIONS/ADR-0004-mt5-server-time.md).
 
 ## Modes
 

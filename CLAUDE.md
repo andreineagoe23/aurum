@@ -36,8 +36,15 @@ Its job is to tell the truth, not to make backtests look good.
 - Time: aware UTC everywhere; naive datetimes rejected (ruff `DTZ`). Use `UtcDatetime` in
   models, `to_utc()` at boundaries, `ClockPort` for "now" (never `datetime.now` in logic).
   Bars keyed by open time. See ADR-0003.
+- MT5 time is server wall clock (Fusion: New York + 7h). Convert only via
+  `aurum.adapters.mt5.servertime.ServerTimeZone`, both for values read and for query bounds;
+  nothing outside `aurum.adapters.mt5` sees a server timestamp. ADR-0004.
+- Idempotency key = MT5 order comment (≤ 29 chars, the Python API limit), plus
+  `broker.magic_number`. Dedup searches positions, pending orders and opening history orders.
+  ADR-0005.
 - Units in names/docstrings: *price* (USD/oz), *points* (× `SymbolSpec.point`), *lots*, *money*
-  (account ccy). Commission on deals is negative.
+  (account ccy, read from the broker: `broker.account_currency: auto`; the demo is GBP).
+  Commission on deals is negative.
 - Models: pydantic v2, `frozen=True`, `extra="forbid"`, invariants in `model_validator`.
 - Config: YAML in `configs/`, validated in `aurum/settings.py`, unknown keys are errors,
   clock times must be quoted `"HH:MM"`. Safety caps live in the validators.
@@ -47,7 +54,9 @@ Its job is to tell the truth, not to make backtests look good.
 - Session phases: ADR-0002. `SessionPhase.entries_allowed` / `.must_be_flat`.
 - Tests: `tests/factories.py` builders; `tests/unit`, `tests/property` (hypothesis),
   `tests/integration` (`@pytest.mark.mt5`, auto-skipped off Windows), `tests/replay`,
-  `tests/fault`. Warnings are errors.
+  `tests/fault`. Warnings are errors. MT5 logic is unit-tested against `tests/fake_mt5.py`;
+  unit tests never touch a real terminal. Tests that send demo orders are also marked
+  `mt5_orders` and need `AURUM_MT5_ORDER_TESTS=1`.
 - Unimplemented CLI commands exit with code 2 and name their phase.
 - Dependencies: add only when used, with a one-line reason in `pyproject.toml`.
 
