@@ -1,15 +1,21 @@
 """Unit tests for doctor checks."""
 
 import sysconfig
+from datetime import date
 from pathlib import Path
 
+import pytest
+
 from aurum.monitoring.doctor import (
+    CheckResult,
     Status,
     check_architecture,
     check_data_dir,
     check_mt5_package,
     check_python,
+    check_settings,
 )
+from aurum.settings import load_settings
 
 
 def test_architecture() -> None:
@@ -39,3 +45,21 @@ def test_data_dir_under_file_fails(tmp_path: Path) -> None:
 
 def test_python_ok() -> None:
     assert check_python().status is Status.OK
+
+
+def test_news_calendar_and_kill_switch_checks(
+    repo_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("AURUM_DATA_DIR", str(tmp_path))
+    settings = load_settings(repo_root, env_file=tmp_path / "none.env")
+
+    def by_name(today: date) -> dict[str, CheckResult]:
+        return {r.name: r for r in check_settings(settings, os_name="darwin", today=today)}
+
+    assert by_name(date(2026, 10, 9))["news calendar"].status is Status.OK  # Dec 9 listed
+    late = by_name(date(2026, 10, 11))["news calendar"]  # 60 days later is past Dec 9
+    assert late.status is Status.WARN
+    assert "add the next ones" in late.detail
+    assert "kill switch" not in by_name(date(2026, 10, 9))
+    (tmp_path / "KILL").write_text("test", encoding="utf-8")
+    assert by_name(date(2026, 10, 9))["kill switch"].status is Status.WARN

@@ -5,12 +5,19 @@ import sys
 import sysconfig
 import uuid
 from dataclasses import dataclass
+from datetime import date, timedelta
 from enum import StrEnum
 from pathlib import Path
 
 from aurum.adapters.mt5.loader import is_available as mt5_available
+from aurum.adapters.storage.layout import DataLayout
+from aurum.core.clock import SystemClock
 from aurum.core.errors import ConfigError
+from aurum.sessions.news import NewsBlackout
 from aurum.settings import Settings, find_project_root, load_settings, readiness_issues
+
+NEWS_HORIZON_DAYS = 60
+"""Warn when the listed FOMC dates end sooner than this (add each year's dates in time)."""
 
 
 class Status(StrEnum):
@@ -75,7 +82,10 @@ def check_data_dir(data_dir: Path) -> CheckResult:
     return CheckResult("data dir", Status.OK, f"{data_dir} writable")
 
 
-def check_settings(settings: Settings, os_name: str = sys.platform) -> list[CheckResult]:
+def check_settings(
+    settings: Settings, os_name: str = sys.platform, today: date | None = None
+) -> list[CheckResult]:
+    today = today or SystemClock().now().date()
     results = [
         CheckResult(
             "config",
@@ -101,8 +111,18 @@ def check_settings(settings: Settings, os_name: str = sys.platform) -> list[Chec
         )
     for issue in readiness_issues(settings):
         results.append(CheckResult("readiness", Status.FAIL, issue))
-    if (settings.data_dir / "KILL").exists():
+    if DataLayout(settings.data_dir).kill_switch().exists():
         results.append(CheckResult("kill switch", Status.WARN, "KILL file present: trading locked"))
+    last_fomc = NewsBlackout(settings.config.risk.news_blackout).last_fomc_date
+    horizon = today + timedelta(days=NEWS_HORIZON_DAYS)
+    results.append(
+        CheckResult(
+            "news calendar",
+            Status.OK if last_fomc >= horizon else Status.WARN,
+            f"FOMC dates listed through {last_fomc}"
+            + ("" if last_fomc >= horizon else f"; add the next ones to risk.yaml (< {horizon})"),
+        )
+    )
     return results
 
 

@@ -1,6 +1,6 @@
 """Unit tests for the aurum CLI."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -9,8 +9,9 @@ from typer.testing import CliRunner
 from aurum.adapters.mt5 import MT5Broker
 from aurum.cli import app
 from aurum.core.clock import ManualClock
+from aurum.core.models import OrderIntent
 from aurum.ledger.trial_ledger import TrialLedger
-from aurum.settings import Settings
+from aurum.settings import AppConfig, Settings
 from tests.fake_mt5 import FakeMT5
 
 REPO_ROOT = Path(__file__).parents[2]
@@ -43,7 +44,7 @@ def test_doctor_fails_on_empty_config(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
 @pytest.mark.parametrize(
     "args",
-    [["kill"], ["trade", "demo"], ["shadow", "run"]],
+    [["trade", "demo"], ["shadow", "run"]],
 )
 def test_placeholders_exit_2(args: list[str]) -> None:
     assert runner.invoke(app, args).exit_code == 2
@@ -141,3 +142,54 @@ def test_data_backfill_writes_days_and_report(
     assert len(list((tmp_path / "raw_broker_bars/mt5/XAUUSD/H1").iterdir())) == 2
     assert list((tmp_path / "quality_reports" / "backfill").glob("*.json"))
     assert "2026-10-06" in result.output  # a weekday with no data is listed as empty
+
+
+# --------------------------------------------------------------------------- kill switch
+
+
+def test_kill_and_unkill_in_backtest_mode_touch_no_broker(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["kill", "--reason", "drill"])
+    assert result.exit_code == 0, result.output
+    assert "sends nothing to the broker" in result.output
+    assert "drill" in (tmp_path / "KILL").read_text(encoding="utf-8")
+    cleared = runner.invoke(app, ["unkill"])
+    assert "kill switch cleared" in cleared.output
+    assert not (tmp_path / "KILL").exists()
+    assert "was not engaged" in runner.invoke(app, ["unkill"]).output
+
+
+def test_kill_in_demo_flattens_only_aurum_positions(
+    fake_terminal: FakeMT5, monkeypatch: pytest.MonkeyPatch, app_config: AppConfig
+) -> None:
+    from tests.factories import approve, signal
+    from tests.unit.test_mt5_adapter import NOW, make_settings
+
+    settings = make_settings(app_config)
+    broker = MT5Broker(settings, mt5_module=fake_terminal, clock=ManualClock(NOW))
+    broker.connect()
+    for offset in (0, 1):
+        sig = signal(t=NOW + timedelta(seconds=offset), stop_loss=4127.0)
+        broker.send_order(OrderIntent.from_signal(sig, approve(sig, 0.01), created_at=sig.time))
+    # MT5Broker stamps Aurum's magic on everything it sends: make the second one a trade
+    # placed by hand in the terminal (magic 0, no AU comment).
+    manual = list(fake_terminal.positions.values())[1]
+    manual.magic, manual.comment = 0, "by hand"
+    assert len(broker.positions()) == 2
+    monkeypatch.setenv("AURUM_MODE", "DEMO")
+    result = runner.invoke(app, ["kill"])
+    assert result.exit_code == 0, result.output
+    assert "1 Aurum orders/positions flattened" in result.output
+    (left,) = broker.positions()
+    assert left.magic == 0
+
+
+def test_watchdog_alarm_engages_the_kill_switch(tmp_path: Path) -> None:
+    # No heartbeat at all: an alarm only inside the trading window, idle otherwise.
+    result = runner.invoke(app, ["watchdog"])
+    if "MISSING" in result.output:
+        assert result.exit_code == 1
+        assert (tmp_path / "KILL").exists()
+    else:
+        assert "IDLE" in result.output
+        assert result.exit_code == 0
+        assert not (tmp_path / "KILL").exists()

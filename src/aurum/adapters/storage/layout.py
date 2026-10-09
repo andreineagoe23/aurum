@@ -97,6 +97,17 @@ class DataLayout:
     def specs_dir(self, symbol: str) -> Path:
         return self.root / "specs" / symbol
 
+    # trading state (Phase 4) --------------------------------------------------------
+    def kill_switch(self) -> Path:
+        """``KILL``: while it exists, Aurum flattens and opens nothing (``aurum unkill``)."""
+        return self.root / "KILL"
+
+    def intent_store(self) -> Path:
+        return self.root / "state" / "intents.sqlite"
+
+    def heartbeat(self, process: str) -> Path:
+        return self.root / "state" / f"{process}.heartbeat.json"
+
 
 def days_in(directory: Path) -> list[date]:
     """UTC dates of the ``<date>.parquet`` files (or ``<date>/`` dirs) in ``directory``, sorted."""

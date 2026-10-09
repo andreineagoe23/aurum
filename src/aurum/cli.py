@@ -905,16 +905,89 @@ def trade_demo() -> None:
     _not_yet("trade demo", 8)
 
 
+def _flatten_now(settings: Settings) -> bool:
+    """DEMO/LIVE: connect and close Aurum's positions and orders now. True if all succeeded."""
+    from aurum.core.enums import ExecutionStatus, Mode
+    from aurum.execution.orders import flatten_owned
+
+    if settings.mode not in (Mode.DEMO, Mode.LIVE):
+        console.print(
+            f"AURUM_MODE={settings.mode}: this command sends nothing to the broker. "
+            "A running DEMO trader flattens on its next step."
+        )
+        return True
+    broker, _ = _connected_broker()
+    reports = flatten_owned(broker, settings.config.broker.magic_number)
+    ok = all(r.status in (ExecutionStatus.CLOSED, ExecutionStatus.CANCELLED) for r in reports)
+    for r in reports:
+        console.print(f"{r.status} key={r.idempotency_key} {r.message}")
+    console.print(
+        f"{len(reports)} Aurum orders/positions flattened"
+        if ok
+        else "[red]flatten incomplete[/red]"
+    )
+    return ok
+
+
 @app.command()
-def kill() -> None:
-    """Cancel pending orders, close positions and lock trading."""
-    _not_yet("kill", 4)
+def kill(
+    reason: Annotated[str, typer.Option(help="Why (written into the KILL file)")] = "manual",
+) -> None:
+    """Lock trading (KILL file) and, in DEMO mode, close Aurum's positions and orders now."""
+    from aurum.execution.killswitch import KillSwitch
+
+    settings = _settings_or_exit()
+    switch = KillSwitch(DataLayout(settings.data_dir).kill_switch())
+    switch.engage(reason, SystemClock().now())
+    console.print(f"[bold red]kill switch engaged[/bold red]: {switch.path} (clear: aurum unkill)")
+    if not _flatten_now(settings):
+        raise typer.Exit(1)
 
 
 @app.command()
 def unkill() -> None:
-    """Clear the kill-switch lock."""
-    _not_yet("unkill", 4)
+    """Clear the kill-switch lock (delete the KILL file)."""
+    from aurum.execution.killswitch import KillSwitch
+
+    settings = _settings_or_exit()
+    switch = KillSwitch(DataLayout(settings.data_dir).kill_switch())
+    reason = switch.reason()
+    if switch.clear():
+        console.print(f"kill switch cleared (was: {reason})")
+    else:
+        console.print("kill switch was not engaged")
+
+
+@app.command()
+def watchdog(
+    process: Annotated[str, typer.Option(help="Heartbeat to check")] = "trader",
+    max_age_seconds: Annotated[int, typer.Option(help="Oldest acceptable heartbeat")] = 120,
+) -> None:
+    """Check the trader's heartbeat; if it is stale or missing while the trader should run,
+    engage the kill switch (and flatten now in DEMO mode). Exit 1 on alarm."""
+    from aurum.data.market_hours import MarketHours
+    from aurum.execution.killswitch import KillSwitch
+    from aurum.monitoring.watchdog import check_heartbeat
+    from aurum.sessions.calendar import TradingCalendar
+
+    settings = _settings_or_exit()
+    layout = DataLayout(settings.data_dir)
+    cfg = settings.config
+    now = SystemClock().now()
+    result = check_heartbeat(
+        layout.heartbeat(process),
+        now,
+        max_age=timedelta(seconds=max_age_seconds),
+        calendar=TradingCalendar(cfg.sessions, MarketHours(cfg.data.market)),
+    )
+    console.print(f"{result.verdict}: {result.detail}")
+    if not result.alarm:
+        return
+    switch = KillSwitch(layout.kill_switch())
+    switch.engage(f"watchdog: {process} heartbeat {result.verdict}", now)
+    console.print(f"[bold red]kill switch engaged[/bold red]: {switch.path}")
+    _flatten_now(settings)
+    raise typer.Exit(1)
 
 
 if __name__ == "__main__":
