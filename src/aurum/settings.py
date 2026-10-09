@@ -478,9 +478,16 @@ def load_settings(project_root: Path | None = None, *, env_file: Path | None = N
     )
 
 
+DEMO_TRADING_ENABLED: Final = False
+"""Owner decision (2026-10-09): demo order execution stays disabled until Phase 8, even though
+``risk.max_spread_points`` is now calibrated. Phase 8 flips this after sign-off."""
+
+
 def readiness_issues(settings: Settings) -> list[str]:
     """Reasons the configured mode must not start yet (empty = ready)."""
     issues: list[str] = []
+    if settings.mode is Mode.DEMO and not DEMO_TRADING_ENABLED:
+        issues.append("demo trading is disabled until Phase 8 (owner decision)")
     if settings.mode in (Mode.DEMO, Mode.LIVE):
         if settings.config.risk.max_spread_points is None:
             issues.append("risk.max_spread_points is not calibrated (Phase 2)")

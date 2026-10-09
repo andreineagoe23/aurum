@@ -5,7 +5,10 @@ max_trades_per_day: 3
 daily_loss_limit_pct: 1.0
 weekly_loss_limit_pct: 2.5
 consecutive_loss_cooldown: 2      # this many consecutive losses -> locked out for rest of session
-max_spread_points: null           # TODO(Phase 2): calibrate from collected spread stats. DEMO refuses while null.
+# p99 of the spread at M5 decision instants on exact tick days 2026-06-26..10-08, rounded up
+# to 5 (reports/phase_2.md §5; blocks ~0.8% of normal decisions and the US-release spikes).
+# Re-derive from collector data after one month of live capture (`aurum data spreads`).
+max_spread_points: 20
 max_spread_atr_fraction: 0.15     # spread vs M15 ATR
 min_minutes_before_cutoff: 45     # no new entries within this many minutes of force_flat_at
 stale_quote_seconds: 10

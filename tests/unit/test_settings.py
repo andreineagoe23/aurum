@@ -43,7 +43,7 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
     assert app_config.sessions.force_flat_at == time(20, 0)
     assert app_config.broker.commission.per_lot_round_trip == pytest.approx(4.50)
     assert app_config.risk.max_open_positions == 1
-    assert app_config.risk.max_spread_points is None
+    assert app_config.risk.max_spread_points == 20
     assert app_config.promotion.live_enabled is False
     assert set(app_config.strategies) == {
         "trend_pullback",
@@ -203,11 +203,15 @@ def test_blank_env_values_are_none() -> None:
 
 
 def test_readiness_blocks_demo_until_spread_calibrated(app_config: AppConfig) -> None:
-    def settings(mode: Mode) -> Settings:
+    uncalibrated = app_config.model_copy(
+        update={"risk": app_config.risk.model_copy(update={"max_spread_points": None})}
+    )
+
+    def settings(mode: Mode, config: AppConfig = uncalibrated) -> Settings:
         env = EnvSettings(_env_file=None, aurum_mode=mode)
         return Settings(
             env=env,
-            config=app_config,
+            config=config,
             project_root=Path("."),
             config_dir=Path("configs"),
             data_dir=Path("data"),
@@ -218,3 +222,7 @@ def test_readiness_blocks_demo_until_spread_calibrated(app_config: AppConfig) ->
     assert any("max_spread_points" in i for i in demo)
     assert any("MT5_LOGIN" in i for i in demo)
     assert any("live_enabled" in i for i in readiness_issues(settings(Mode.LIVE)))
+    # Calibrated cap (the committed config): DEMO is still refused until Phase 8.
+    calibrated = readiness_issues(settings(Mode.DEMO, app_config))
+    assert not any("max_spread_points" in i for i in calibrated)
+    assert any("Phase 8" in i for i in calibrated)
