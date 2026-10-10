@@ -40,6 +40,20 @@ Owner decision 2026-10-10; ADR-0008 amendment, ADR-0009 §9; rule in
   supplied replay, `best_case_replay_required` = (worst-case run has flagged trades) and
   `best_run_reused: false`.
 
+## Stop-size cap (Phase 5 report contract)
+
+Reviewer condition 2026-10-10; `docs/STRATEGY_SPEC_TEMPLATE.md` §8a.
+
+- Every spec states its stop-size cap: points and price, ≤ the minimum-volume affordability
+  ceiling derived from its own stated inputs (reference equity, risk %, symbol point,
+  `volume_min`, `volume_step`, money per price unit per lot, commission, stop slippage).
+  There is no global cap.
+- A setup whose stop is above the cap emits no signal. The stop is never clamped, shortened
+  or moved to fit.
+- Each candidate report shows `stop_above_cap`, the number of setups rejected for this reason.
+  It sits next to the trades taken and the risk engine's rejections, which are counted
+  separately (`sized volume < volume_min` and the other gates).
+
 ## Sealed final test
 
 - The newest substantial period is sealed. Its date range is stored in config.

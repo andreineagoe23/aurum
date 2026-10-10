@@ -15,7 +15,7 @@ _Last updated: 2026-10-10._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **Approved with conditions; not started.** Blocked on the pre-Phase-5 queue below | — |
+| 5 Strategy lab | **Approved with conditions; not started.** Blocked on the pre-Phase-5 queue below: items 1–5 done, **6 (CI) left** | — |
 
 ## Work queue (in order)
 
@@ -47,10 +47,38 @@ _Last updated: 2026-10-10._
    verdicts differ. Best case = a second replay with `intrabar_policy: best`, linked in the
    ledger, never edited trades; missing with flagged trades → fail closed; no override. The
    best-case policy in `SimBroker` and the ledger link are built with the Phase 5 runner.
-5. **Stop-size cap in every strategy spec.** At 0.25% of $10k ($25 budget) a stop needs
-   ≲ $20–25 at 0.01 lot or the risk engine rejects every trade (all 1,524 14:30 SELLs of the
-   reference strategy were rejected: 3,000 points ≈ $30). Add the cap to
-   `docs/STRATEGY_SPEC_TEMPLATE.md`.
+   Hardened (449d261): net P&L goes through one cent quantizer, `phase3b.to_cents`
+   (decimal `ROUND_HALF_UP`, ±0.005 → ±0.01, never −0.00). NaN/±inf `net_pnl` is rejected.
+   The summary adds `best_case_replay_required` and `best_run_reused`.
+5. ~~**Stop-size cap in every strategy spec**~~ — **done** (docs only; no spec validator
+   exists, so nothing is enforced in code). `docs/STRATEGY_SPEC_TEMPLATE.md` §8a requires an
+   inputs table with sources, the minimum-volume affordability ceiling (the `size_volume`
+   calculation, floored to whole points), a strategy cap ≤ ceiling, and the cap's equity
+   floor. A stop above the cap → no signal, recorded as `stop_above_cap`; never clamped. A cap
+   change is a version bump. Phase 5 reports count `stop_above_cap`
+   (`docs/VALIDATION_PROTOCOL.md`). Recomputed motivating example:
+
+   | Input | Value | Source |
+   |---|---|---|
+   | Reference equity, currency | 10,000.00 USD | `configs/backtest.yaml` `initial_balance`; `broker.yaml` `account_currency` |
+   | Risk per trade → budget | 0.25% → **25.00 USD** | `configs/risk.yaml` |
+   | Point, `volume_min`, `volume_step` | 0.01 price, 0.01 lot, 0.01 lot | spec snapshot `20261010T000046Z.json` (USD account); same in `reports/phase_1.md` |
+   | Money per price unit per lot | 100.00 USD (`tick_value` 1.0 ÷ `tick_size` 0.01) | spec snapshot `20261010T000046Z.json` |
+   | Commission | 2.25 per lot per side, 4.50 round trip | `configs/broker.yaml` |
+   | Stop slippage | 5 points = 0.05 price (5.00 USD per lot) | `configs/broker.yaml` (provisional) |
+
+   Ceiling = (25.00 ÷ 0.01 − 4.50 − 0.05 × 100) ÷ 100 = 24.905 price → floor(2,490.5) =
+   **2,490 points (24.90 USD/oz)**. At 0.01 lot that stop risks 24.995 ≤ 25.00, and 2,491
+   points risks 25.005. Both checked against `size_volume`: 2,490 sizes to 0.01 lot, 2,491 to
+   0. The equity floor of a 2,490-point cap is 9,998.00 USD, so after a 2 USD loss the engine
+   rejects cap-sized stops. A spec should pick a cap with room below the ceiling. The
+   reference strategy's 14:30 SELL (3,000 points) risks 30.095 at 0.01 lot, hence all 1,524
+   rejections.
+
+   **Source of truth, open:** the only *tracked* record of the XAUUSD contract is
+   `reports/phase_1.md`, measured on the old **GBP** account. The USD-account values above
+   come from the data-dir snapshot, which is not in git. Record them in a tracked doc when
+   the next spec is written (or re-run `aurum mt5 symbols --find gold`).
 6. **CI** (GitHub Actions or similar: ruff, format check, mypy, pytest on Linux/macOS). "Windows
    only, no CI" is the weakest point of Phase 4. MT5 tests auto-skip off Windows.
 
@@ -76,7 +104,9 @@ _Last updated: 2026-10-10._
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
 - Write each strategy spec (`docs/STRATEGY_SPEC_TEMPLATE.md`) **before any code**, including the
-  stop-size cap. The reviewer offered to draft the trend-pullback spec — ask the user.
+  stop-size cap (§8a, derived per spec). The reviewer offered to draft the trend-pullback
+  spec — ask the user.
+- Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
 - Report **intra-bar sensitivity** per candidate (worst + best replay, `phase_3b_required`);
@@ -95,4 +125,8 @@ _Last updated: 2026-10-10._
   (x64 Python under emulation), data `C:\aurum-data` (`AURUM_DATA_DIR`). The live tick
   collector runs there continuously; don't stop it.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
-- Test suite: ~380 tests, ~70 s with coverage, 92% coverage. Keep it lean (see `CLAUDE.md`).
+- Test suite: 393 tests (384 passed, 9 skipped on the VM: MT5 live-market/order tests and one
+  non-Windows test), ~64 s with coverage, 92% coverage (2026-10-10). Keep it lean (see
+  `CLAUDE.md`). `uv run mypy` (configured `files = ["src"]`) is clean; `uv run mypy src tests`
+  fails before checking: `tests/unit/test_mt5_adapter.py` "found twice under different module
+  names" (tests has no `__init__.py`; pre-existing, for the CI item).

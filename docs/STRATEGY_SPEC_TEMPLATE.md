@@ -75,6 +75,52 @@ Guidance: variant `m5` only. Variant `m15` enters on the M15 close and this sect
 - Minimum distance: stop distance in points >= `trade_stops_level` of the symbol (from `SymbolSpec`) plus `<N>` points.
 - Always attached broker-side at order submission.
 
+### 8a. Stop-size cap (required)
+
+Guidance: the risk engine sizes down to `volume_step` and never rounds up to `volume_min` (ADR-0010). A stop too wide to afford at `volume_min` is therefore rejected on every trade. The cap makes that limit a rule of the strategy, fixed before any result is seen. Derive the cap for **this** spec from the inputs below. There is no global cap: nothing goes in `risk.yaml`. Every input names its source. Read symbol values from a spec snapshot (`<data>/specs/<symbol>/<stamp>.json`, written by `aurum mt5 symbols` and the collector), never from memory. If an input is not authoritative, write `UNRESOLVED` and do not finish the spec.
+
+| Input | Value | Unit | Source |
+|---|---|---|---|
+| Reference equity | `<10000.00>` | account currency | `<configs/backtest.yaml initial_balance, or the demo account's equity on YYYY-MM-DD>` |
+| Account currency | `<USD>` | | `configs/broker.yaml` `account_currency` |
+| Risk per trade | `<0.25>` | % of equity | `configs/risk.yaml` `risk_per_trade_pct` |
+| Risk budget = equity × % / 100 | `<25.00>` | account currency | computed |
+| Symbol point | `<0.01>` | price | spec snapshot `<stamp>.json` |
+| `volume_min` | `<0.01>` | lots | spec snapshot |
+| `volume_step` | `<0.01>` | lots | spec snapshot |
+| Money per price unit per lot = `tick_value / tick_size` | `<100.00>` | account currency per 1.00 price per lot | spec snapshot |
+| Commission per lot per side / round trip | `<2.25 / 4.50>` | account currency | `configs/broker.yaml` `commission.per_lot_per_side` |
+| Stop slippage | `<5>` points = `<0.05>` price | points, price | `configs/broker.yaml` `slippage.points_per_side` |
+| **Ceiling** (minimum-volume affordability) | `<N>` points = `<N × point>` price | points, price | formula below |
+| **Strategy cap** (≤ ceiling) | `<N>` points = `<N × point>` price | points, price | chosen; reason: `<...>` |
+| Risk at `volume_min` with the stop at the cap | `<...>` ≤ budget `<...>` | account currency | formula below |
+| Equity floor of the cap = risk at `volume_min` ÷ (% / 100) | `<...>` | account currency | below this equity the risk engine rejects cap-sized stops |
+
+The calculation is the one `aurum.risk.policy.size_volume` uses:
+
+```text
+budget                 = reference_equity × risk_per_trade_pct / 100
+risk at minimum volume = volume_min × ( stop_distance_price × money_per_price_unit_per_lot
+                                      + round_trip_commission_per_lot
+                                      + stop_slippage_price × money_per_price_unit_per_lot )
+require                  risk at minimum volume ≤ budget
+
+max_distance_price  = ( budget / volume_min
+                      − round_trip_commission_per_lot
+                      − stop_slippage_price × money_per_price_unit_per_lot )
+                      / money_per_price_unit_per_lot
+max_distance_points = floor(max_distance_price / point)     ← always rounded down, never up
+ceiling             = max_distance_points points = max_distance_points × point price
+```
+
+Rules:
+
+- **Stop above the cap → no signal.** Measure the distance from the entry reference price of section 7 (for a market order, the decision bar's close). If it is greater than the cap, the strategy emits nothing for that setup and records the reason `stop_above_cap`.
+- **Never fit the stop to the cap.** A stop is never clamped, shortened or moved just to fit the cap. The stop from the price rule above is the trade's stop, or there is no trade.
+- **The cap is a strategy rule.** Changing it, or any input it was derived from, needs a version bump in sections 1 and 19.
+- **Phase 5 reports count `stop_above_cap`** for each candidate, next to the trades taken (`docs/VALIDATION_PROTOCOL.md`).
+- **The engine can still reject.** It sizes on the equity at decision time and measures from the executable quote (ask for a buy, bid for a sell), not from the bar close. A stop under the cap is rejected (`sized volume … < volume_min`) when equity is below the cap's equity floor, or when the spread pushes the distance over the ceiling. Those rejections are risk rejections, reported separately, never as `stop_above_cap`.
+
 ## 9. Target
 
 `<price rule or R-multiple, e.g. entry + 1.5 x stop distance>`
