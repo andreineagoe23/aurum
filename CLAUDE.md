@@ -1,6 +1,9 @@
 # CLAUDE.md — Aurum working rules
 
-Read `docs/MASTER_PROMPT.md` (full spec) and this file at the start of every session.
+Start of every session, in this order: this file → `docs/STATUS.md` (phase state, approved work
+queue, open decisions) → `docs/ARCHITECTURE.md` (code map, flows, which test guards what) →
+`docs/MASTER_PROMPT.md` (full spec) when a task touches scope or phase gates. Keep STATUS.md
+current: update it when a phase, decision or the queue changes.
 Aurum = research + automated trading platform for **intraday XAUUSD on MT5, demo only**.
 Its job is to tell the truth, not to make backtests look good.
 
@@ -57,6 +60,14 @@ Its job is to tell the truth, not to make backtests look good.
   `tests/fault`. Warnings are errors. MT5 logic is unit-tested against `tests/fake_mt5.py`;
   unit tests never touch a real terminal. Tests that send demo orders are also marked
   `mt5_orders` and need `AURUM_MT5_ORDER_TESTS=1`.
+- Keep the suite lean (the user cut it from 610 to ~380 on 2026-10-10 and wants it to stay
+  small). Extend an existing test before adding a new one; one test per behaviour, not per
+  input. Use a loop with an assertion message for case tables, and a hypothesis property
+  instead of long example tables. Safety guarantees (live guard, OrderIntent invariants,
+  idempotency, kill switch, fault and golden scenarios) keep their own named tests. Check
+  `--cov` stays level when merging or removing tests.
+- Tests never depend on today's date: pin every clock, including `SystemClock` inside the
+  code under test (see `test_cli.py::test_data_collect_runs_and_stops`).
 - Unimplemented CLI commands exit with code 2 and name their phase.
 - Dependencies: add only when used, with a one-line reason in `pyproject.toml`.
 - Data (Phase 2, ADR-0006/0007): one Parquet file per symbol and UTC date under

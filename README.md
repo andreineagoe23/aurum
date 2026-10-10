@@ -18,8 +18,9 @@ MetaTrader 5 and the `MetaTrader5` Python package run only on Windows. See [docs
 
 ## Repository layout
 
-- `src/aurum/` : package (core, ports, adapters, sessions, ledger, monitoring, cli; later data, features, strategies, risk, execution, backtest, validation, apps)
-- `configs/` : YAML configs (broker, sessions, risk, promotion)
+- `src/aurum/` : package (core, ports, adapters, data, sessions, features, strategies, risk, execution, backtest, ledger, monitoring, apps, cli; validation is Phase 6). Code map: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- `configs/` : YAML configs (broker, sessions, risk, promotion, data, backtest, strategies/)
+- `mql5/` : the MT5 Strategy Tester EA used for the parity check
 - `docs/` : documentation and ADRs
 - `tests/` : unit, property, replay, integration (Windows only), fault
 - `scripts/` : setup scripts
@@ -27,6 +28,7 @@ MetaTrader 5 and the `MetaTrader5` Python package run only on Windows. See [docs
 
 ## Docs
 
+- [Status](docs/STATUS.md) : current phase, approved work queue, open decisions
 - [Master prompt](docs/MASTER_PROMPT.md) : source of truth for the build
 - [Project charter](docs/PROJECT_CHARTER.md)
 - [Architecture](docs/ARCHITECTURE.md)
@@ -34,7 +36,7 @@ MetaTrader 5 and the `MetaTrader5` Python package run only on Windows. See [docs
 - [Strategy spec template](docs/STRATEGY_SPEC_TEMPLATE.md)
 - [Validation protocol](docs/VALIDATION_PROTOCOL.md)
 - [VM setup](docs/VM_SETUP.md)
-- [ADR-0001: Ports and adapters](docs/DECISIONS/ADR-0001-ports-and-adapters.md)
+- [Decisions (ADRs)](docs/DECISIONS/) and phase reports in `reports/phase_<n>.md`
 
 ## Safety
 

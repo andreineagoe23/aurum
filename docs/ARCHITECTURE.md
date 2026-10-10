@@ -1,100 +1,106 @@
 # Architecture
 
-Aurum uses a ports-and-adapters (hexagonal) design. Strategy, risk and simulator code never know whether they run in a backtest, shadow mode or demo trading. See `docs/DECISIONS/ADR-0001-ports-and-adapters.md`.
+Code map for working in the repo: what each package does, how the main flows run, and which
+tests guard what. Decisions and their reasons are in `docs/DECISIONS/` (ADRs); dataset schemas
+in `docs/DATA_DICTIONARY.md`; current state in `docs/STATUS.md`.
+
+Ports and adapters ([ADR-0001](DECISIONS/ADR-0001-ports-and-adapters.md)): strategy, risk and
+execution code never know whether they run in a backtest, shadow mode or demo trading.
 
 ```text
-               ┌─────────────── platform-independent core (Mac + Windows) ───────────────┐
-MarketEvent ─► │ Feature pipeline (H1 regime │ M15 setup │ M5 trigger, as-of joins)       │
-               │        ↓                                                                 │
-               │ Strategy  → Signal                                                       │
-               │        ↓                                                                 │
-               │ Risk engine (independent, cannot be bypassed) → RiskDecision             │
-               │        ↓                                                                 │
-               │ OrderIntent (idempotency key) → BrokerPort                               │
-               └─────────────────────────────────────────────────────────────────────────┘
-                                          │
-          ┌───────────────────────┬───────┴──────────────┬──────────────────────────┐
-     FakeBroker (Mac)      SimBroker (backtest)     ShadowBroker              MT5Broker (Windows)
-     unit tests            bid/ask tick replay      live data, no orders      real demo orders
+ history (Parquet)                    live MT5 terminal (Windows VM)
+        │                                       │
+  backtest.loading ─► HistoricalMarket    adapters.mt5.MT5Broker
+        │                 │                     │
+        │            SimBroker ─────────────────┤  (both implement ports.broker.BrokerPort)
+        ▼                 ▼                     ▼
+  features.view.MarketView (bars closed by now) ─► Strategy ─► Signal
+                                                        │
+                       risk (PolicyRiskEngine) ─► RiskDecision
+                                                        │
+                       execution.Engine ─► OrderManager ─► OrderIntent ─► BrokerPort
 ```
 
-## Phase 0 modules
+## Packages (`src/aurum/`)
 
-### `aurum.core` (imports nothing from other aurum packages)
-
-| Module | Contents |
+| Package | Modules → responsibility |
 |---|---|
-| `enums.py` | `Mode`, `Side`, `OrderType`, `AccountTradeMode`, `SessionPhase`, `ExecutionStatus`, `DealEntry` |
-| `timeframes.py` | `Timeframe` with `bar_open_time`, `bar_close_time`, `last_completed_bar`; `BarSpan` |
-| `timeutil.py` | `UtcDatetime` pydantic type, `to_utc`. Naive datetimes are rejected. |
-| `clock.py` | `SystemClock`, `ManualClock` (injectable, for tests) |
-| `models.py` | Frozen pydantic v2 domain models (see `docs/DATA_DICTIONARY.md`) |
-| `safety.py` | Pure live-trading guard. Order sending is allowed only in DEMO or LIVE mode. A non-demo account additionally needs `AURUM_MODE=LIVE`, the exact acknowledgement phrase, and `configs/promotion.yaml` with `live_enabled: true` and a sign-off date in the past. |
-| `errors.py` | Exception types |
-
-### `aurum.ports`
-
-- `broker.py`: `BrokerPort` Protocol (connect, account_info, symbol_info, latest_tick, bars, ticks, positions, orders, check_order, send_order, modify_position, close_position, cancel_order, history_deals).
-- `clock.py`: `ClockPort`.
-- `datastore.py`: `DataStorePort` (Phase 2).
-
-### `aurum.adapters`
-
-- `fake.broker.FakeBroker`: in-memory, deterministic fills at bid (sells) and ask (buys).
-- `mt5.loader`: `is_available()` and lazy `load_mt5()`.
-- `mt5.broker.MT5Broker`: the only place `MetaTrader5` is imported, and only inside functions. Connect with retry/backoff; UTC bars, ticks, positions, orders and deals; guarded send/modify/close/cancel. Every write re-reads `account_info` and runs the safety guard first. Idempotency uses the order comment ([ADR-0005](DECISIONS/ADR-0005-idempotency-via-order-comment.md)).
-- `mt5.servertime`: the only server-clock ↔ UTC conversion (New York + 7h, [ADR-0004](DECISIONS/ADR-0004-mt5-server-time.md)), plus the offset check run on every connect.
-- `mt5.snapshot`: immutable symbol-spec snapshots in `<data_dir>/specs/<symbol>/`.
-- `storage`: Parquet/DuckDB store (Phase 2).
-
-### Other packages
-
-- `aurum.settings`: pydantic-settings reading environment variables and YAML configs. Extra keys are forbidden; invalid config fails loudly.
-- `aurum.sessions`:
-  - `clock.py`: `SessionClock`, `DaySchedule`. Converts London wall-clock times to UTC per day with `zoneinfo`.
-  - `state_machine.py`: `SessionStateMachine` emits transitions. It emits an initial transition on its first update so a restart re-triggers force-flat.
-- `aurum.ledger.trial_ledger`: append-only SQLite. UPDATE and DELETE are blocked by triggers; each row has a content hash.
-- `aurum.monitoring`: `logging.py` (structlog JSON with secret redaction), `doctor.py` (environment checks).
-- `aurum.cli`: typer app (`aurum doctor`, placeholders for later commands).
-- Later phases: `data`, `features`, `strategies`, `risk`, `execution`, `backtest`, `validation`, `apps`.
+| `core` (imports nothing else from aurum) | `models` frozen pydantic domain models (`Tick`, `Bar`, `Signal`, `RiskDecision`, `OrderIntent`, `SymbolSpec`, `DealRecord`…); `enums` (`Mode`, `SessionPhase`, `ExitReason`, `DealReason`…); `timeframes` (`Timeframe`, `last_completed_bar`); `timeutil` (`UtcDatetime`, `to_utc`); `clock` (`SystemClock`, `ManualClock`); `safety` live-trading guard; `errors` |
+| `ports` | Protocols: `BrokerPort`, `ClockPort`, `DataStorePort`, `MarketDataSource` (what ingestion needs from a broker) |
+| `adapters.mt5` | The only `MetaTrader5` user, lazily: `broker.MT5Broker` (guarded writes, idempotent send, UTC reads), `servertime` (server clock ↔ UTC, ADR-0004), `frames` (raw arrays → polars), `snapshot` (symbol specs), `tester` (Strategy Tester deals CSV), `loader` |
+| `adapters.fake` | `FakeBroker`: in-memory deterministic broker for unit tests |
+| `adapters.storage` | `layout.DataLayout`/`RunLayout` (every path), `parquet` (atomic, deterministic writes), `live_ticks` (collector chunks, journal, heartbeat), `specs` |
+| `data` | Phase 2 pipeline: `backfill`, `normalize`, `resample` (ticks → M1 → M5/M15/H1), `pipeline` (canonical bars, tick fidelity ADR-0007), `compare`, `qa`, `market_hours`, `spreads`, `hashes`, `depth`, `schemas` (all column definitions), `reports`, `summary` |
+| `sessions` | `clock.SessionClock` (London wall clock → UTC phases, ADR-0002), `calendar.TradingCalendar` (phases + market closures and early closes), `state_machine` (emits on first update → restart flattens), `news` (blackout windows) |
+| `features` | `view` (`BarStore`/`MarketView`: completed bars only), `asof` (joins on close time), `indicators` (ATR) |
+| `strategies` | `base` contract (Signals only), `reference.FixedTimeReference` (parity/null strategy), `registry` (config → strategy) |
+| `risk` | `base` (`RiskEngine`, `RiskContext`), `policy.PolicyRiskEngine` (sizing + every gate, ADR-0010), `fixed.FixedVolumeRisk` (tester parity only) |
+| `execution` | `engine.Engine` (the per-step decision loop for every mode), `orders.OrderManager` (only send path), `intents` (SQLite intent store), `reconcile`, `killswitch` (ADR-0011) |
+| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (config → run → ledger), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` |
+| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed rows |
+| `monitoring` | `logging` (structlog JSON, secret redaction), `doctor`, `watchdog` (heartbeat → kill switch) |
+| `apps` | `collector` (live ticks, Windows); `shadow`, `trader` are Phase 7/8 placeholders |
+| `validation` | Phase 6 placeholder (walk-forward, DSR) |
+| `settings.py` | `.env` + `configs/*.yaml` → validated `Settings`; safety caps live in validators |
+| `cli.py` | `aurum` Typer app (below) |
 
 ## Dependency rules
 
-Enforced by `tests/unit/test_architecture.py`:
+Enforced statically by `tests/unit/test_architecture.py`:
 
 - `aurum.core` imports nothing from other `aurum` packages.
-- `aurum.strategies` and `aurum.features` may not import adapters, execution, apps or `MetaTrader5`.
-- Only `aurum.adapters.mt5` imports `MetaTrader5`, and never at module top level.
+- `strategies` and `features` may not import adapters, execution, apps or `ports.broker`.
+- `risk` may not import adapters, apps or strategies; `execution` may not import adapters, apps
+  or backtest; `sessions` may not import adapters, execution or apps; `backtest` may not import
+  `adapters.mt5` or apps.
+- Only `aurum.adapters.mt5` imports `MetaTrader5`, never at module top level.
 
-## Order flow invariant
+## Main flows
 
-`Signal -> RiskDecision -> OrderIntent -> BrokerPort`.
+**Engine step** (`execution/engine.py`, same code in every mode), at `now = view.now`:
+session update → reconcile (startup, after disconnect, while an outcome is unresolved, after
+any action) → kill switch → flat phases close everything (FORCE_FLAT) → outside OPEN cancel
+pending entries → per position TIMEOUT / INVALIDATION → in OPEN at a decision-timeframe close:
+strategy → risk → `OrderManager.submit`. A disconnect ends the step; the next step retries.
 
-- Strategies return Signals only and cannot create orders.
-- An `OrderIntent` cannot be constructed without an approved `RiskDecision` embedded in it, and must carry a `stop_loss`.
-- Brokers re-check approval and run the safety guard before any write (defense in depth).
+**Backtest** (`aurum backtest run` → `backtest/pipeline.py`): load the Phase 2 store for the
+period → `SimBroker` + `Engine` + risk engine → `runner.run_backtest` wakes at M5 closes, phase
+boundaries and `max_hold` deadlines; at each wake the broker first processes quotes before `t`,
+then the engine decides on bars closed by `t` → `accounting` → `reports/runs/<run_id>/` with
+output hashes → one trial-ledger row. Reruns must be byte-identical (`aurum backtest compare`).
 
-## Session phases
+**Data** (Phase 2): `aurum data backfill` (raw ticks/bars, immutable) and `aurum data collect`
+(live ticks) → `aurum data resample` (normalized ticks, canonical bars; ticks used only on days
+whose tick-built M1 equals the broker's) → `aurum data qa --strict` (0 unexplained gaps) →
+`aurum data hashes --compare` (determinism gate).
 
-`CLOSED -> PRE_SESSION -> OPEN <-> NO_NEW_ENTRIES -> EXIT_ONLY -> FORCE_FLAT`, then back to `CLOSED` at local midnight.
+**Order safety chain**: `Signal` → `RiskDecision(approved)` → `OrderIntent.from_signal` (needs
+an approved decision for that signal, volume ≤ approved, mandatory stop, key `"AU" + signal.key`)
+→ `OrderManager` (records first, refuses intents older than 60 s, lost reply = UNKNOWN, never
+resent) → broker re-checks approval and runs `core.safety` on a fresh `account_info()`.
 
-- New entries are allowed only in `OPEN`.
-- `must_be_flat` is true in `CLOSED`, `PRE_SESSION` and `FORCE_FLAT`.
-- Times come from `configs/sessions.yaml` and are DST-aware.
-- Exact boundaries: [ADR-0002](DECISIONS/ADR-0002-session-phases.md).
+## CLI
 
-## Time conventions
+`aurum doctor` · `mt5 ping|symbols|bars` · `data depth|backfill|collect|qa|resample|spreads|hashes`
+· `backtest run|report|compare|parity` · `ledger list` · `kill` / `unkill` / `watchdog` ·
+placeholders (exit 2): `validate walkforward`, `shadow run`, `trade demo`.
 
-- UTC everywhere internally; London time is used only to define sessions.
-- Bars are keyed by open time and visible at close time (`open + timeframe`).
-- Higher timeframes join lower ones with an as-of join on close time.
-- Details: [ADR-0003](DECISIONS/ADR-0003-time-conventions.md). The MT5 server clock (New York + 7h) is converted inside the adapter: [ADR-0004](DECISIONS/ADR-0004-mt5-server-time.md).
+## Tests (`tests/`)
 
-## Modes
+| Where | What it guards |
+|---|---|
+| `unit/test_architecture.py` | Import boundaries above |
+| `unit/test_live_guard.py`, `unit/test_mt5_adapter.py` (guard section) | Live trading blocked; every write re-checks a fresh account |
+| `unit/test_models.py` | `OrderIntent` invariants (approved decision, volume, stop, key) |
+| `unit/test_policy_risk.py`, `property/test_risk_properties.py` | Sizing and every risk gate; risk after rounding ≤ budget |
+| `unit/test_execution_core.py`, `unit/test_engine.py` | Order manager, reconciliation, engine behaviour |
+| `fault/test_execution_faults.py` | Lost replies, disconnects, restarts, cutoff during disconnect, kill switch (uses `fault/faulty.py::FaultyBroker`) |
+| `fault/test_collector.py` | Collector restarts, IPC failures, gaps, no lost or duplicate ticks |
+| `replay/test_golden.py` + `replay/scenarios.py` | Exact trades and P&L through the full backtest stack; every bug becomes a scenario |
+| `property/test_no_lookahead.py` | Strategies only see bars closed by now; as-of joins on close time |
+| `property/test_session_properties.py`, `…timeframe…`, `…servertime…` | DST and time rules swept over years against independent oracles |
+| `unit/test_sim_broker.py` | Fill prices, intra-bar worst-case rules, rejections |
+| `integration/test_mt5_smoke.py` | Real terminal (Windows only; orders need `AURUM_MT5_ORDER_TESTS=1`) |
 
-| Mode | Broker adapter | May send orders? |
-|---|---|---|
-| `BACKTEST` | Simulated broker (Phase 3); `FakeBroker` in unit tests | No real orders; simulated fills only |
-| `SHADOW` | Shadow broker on live MT5 data | No |
-| `DEMO` | `MT5Broker` on a demo account | Yes, demo account only |
-| `LIVE` | `MT5Broker` | Blocked by default. Requires the full guard in `aurum.core.safety`. Out of scope for v1. |
+Helpers: `factories.py` (models), `fake_mt5.py` (fake `MetaTrader5` module), `simdata.py`
+(hand-built tapes and markets), `sim_store.py` (a small on-disk Phase 2 store).
