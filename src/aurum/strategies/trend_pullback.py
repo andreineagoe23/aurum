@@ -107,6 +107,8 @@ class TrendPullback:
         self._entries_allowed = entries_allowed
         self._min_stop = max(MIN_STOP_POINTS, stops_level_points + 10)
         self._id = strategy_id
+        # Indicator values per (timeframe, kind, bar close). Valid because one instance sees one
+        # market whose completed bars never change (one instance per run or live session).
         self._cache: dict[tuple[Timeframe, str, int], float | None] = {}
         self._rejections: Counter[str] = Counter()
 
@@ -134,6 +136,8 @@ class TrendPullback:
         }
 
     def on_bar(self, view: MarketView) -> Signal | None:
+        if not self._entries_allowed(view.now):  # §12 (the engine also only calls then)
+            return None
         if self._tf is Timeframe.M15:
             return self._on_m15(view)
         return self._on_m5(view)
@@ -280,6 +284,8 @@ class TrendPullback:
         for s in range(hi, -1, -1):
             if int(m15.close_time[s]) < now - TRIGGER_WINDOW_MS:
                 break
+            if int(m15.close_time[s]) == now - M5_MS and not self._consecutive(m15, s):
+                self._rejections["data_gap"] += 1  # counted once: at the first M5 close after it
             side = self._setup(m15, s, h1)
             if side is not None:
                 return s, side
@@ -294,6 +300,8 @@ class TrendPullback:
     ) -> bool:
         sign = side.sign
         if q < 1 or int(m5.open_time[q - 1]) != int(m5.open_time[q]) - M5_MS:
+            return False
+        if not self._entries_allowed(from_ms(int(m5.close_time[q]))):  # §6 session limit
             return False
         prev = float(m5.high[q - 1]) if sign > 0 else float(m5.low[q - 1])
         fast = self._ema(m15, s, M15_FAST)

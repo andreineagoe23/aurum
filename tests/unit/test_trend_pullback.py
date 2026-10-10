@@ -164,8 +164,8 @@ def test_m15_signal_and_rule_boundaries() -> None:
             lambda t: True),
         ("close(b4) == EMA50(b4): strict", store(series(Timeframe.M15,
             [*closes[:-5], e50_b5, *closes[-4:]], T0)), lambda t: True),
-        ("close(b0) == EMA20(b0): strict", store(series(Timeframe.M15,
-            [*closes[:-1], e20_b1], T0)), lambda t: True),
+        ("close(b0) == EMA20(b0): strict", store(series(Timeframe.M15,  # b1 high lowered: only
+            [*closes[:-1], e20_b1], T0, highs={-2: e20_b1 - 0.5})), lambda t: True),  # 5.4 decides
         ("close(b0) == high(b1): strict", store(series(Timeframe.M15, closes, T0,
             highs={-2: closes[-1]})), lambda t: True),
         ("H1 slope 0: no regime", store(base, series(Timeframe.H1, [2000.0] * 530,
@@ -174,6 +174,16 @@ def test_m15_signal_and_rule_boundaries() -> None:
     ]  # fmt: skip
     for name, market, allowed in no_signal:
         assert at(market, strategy(allowed=allowed), T0) is None, name
+
+    class FlatH1Ema(TrendPullback):  # EMA_H1(h0) == EMA_H1(h3) exactly, close(h0) above it
+        def _ema(self, bars: BarSeries, j: int, period: int) -> float | None:
+            return 2000.0 if bars.timeframe is Timeframe.H1 else super()._ema(bars, j, period)
+
+    flat_slope = FlatH1Ema(
+        TrendPullbackParams(), symbol="XAUUSD", point=0.01, decision_timeframe=Timeframe.M15,
+        entries_allowed=lambda t: True,
+    )  # fmt: skip
+    assert at(store(base), flat_slope, T0) is None, "slope == 0.00: no regime"
     touch_equal = store(series(Timeframe.M15, closes, T0, lows={**no_wick, -4: e20_b3}))
     assert at(touch_equal, strategy(), T0) is not None, "low(b3) == EMA20(b3) counts"
 
@@ -216,20 +226,27 @@ def test_stop_bounds_rounding_and_counters() -> None:
     assert (sig.stop_loss, sig.take_profit) == (1999.01, 1978.99)  # 1991 - 1.5 x 8.01 = 1978.985
 
 
-def m5_store(m5_closes: dict[str, float], m15_after: list[float] | None = None) -> BarStore:
+def m5_store(
+    m5_closes: dict[str, float],
+    m15_after: list[float] | None = None,
+    *,
+    m5_lows: dict[str, float] | None = None,
+    h1_extra: list[float] | None = None,
+) -> BarStore:
     """M5 bars: flat history, the 14:15 bar at 2009 (high 2009.50), then ``m5_closes`` keyed
-    "HH:MM" (high = close + 0.50, low = close - 1.00)."""
+    "HH:MM" (high = close + 0.50, low = close - 1.00 unless in ``m5_lows``)."""
     times = sorted(m5_closes)
     closes = [2000.0] * FLAT + [2009.0] + [m5_closes[t] for t in times]
     last = T0.replace(hour=int(times[-1][:2]), minute=int(times[-1][3:]))
-    n = len(closes)
+    n, first = len(closes), len(closes) - len(times) - 1
+    lows = {i: closes[i] - 1.0 for i in range(first, n)}
+    lows.update({first + 1 + times.index(t): v for t, v in (m5_lows or {}).items()})
     m5 = series(Timeframe.M5, closes, last,
-                highs={i: closes[i] + 0.5 for i in range(n - len(times) - 1, n)},
-                lows={i: closes[i] - 1.0 for i in range(n - len(times) - 1, n)})  # fmt: skip
+                highs={i: closes[i] + 0.5 for i in range(first, n)}, lows=lows)  # fmt: skip
     m15 = series(
         Timeframe.M15, m15_closes(m15_after), T0 + timedelta(minutes=15 * len(m15_after or []))
     )
-    return BarStore({Timeframe.H1: h1(), Timeframe.M15: m15, Timeframe.M5: m5})
+    return BarStore({Timeframe.H1: h1(h1_extra), Timeframe.M15: m15, Timeframe.M5: m5})
 
 
 def m5_times(*hhmm: str) -> list[datetime]:
@@ -280,6 +297,32 @@ def test_m5_window_expiry_replacement_one_use_and_restart() -> None:
     assert second is not None
     assert second.reasons[0].startswith("M15 setup at 14:30Z")
 
+    # The trigger bar's own low can be the swing minimum: 1990.00 - 3.00 (d = 2000, the cap).
+    wick = m5_store({"14:20": 2006.0, "14:25": 2007.0}, later, m5_lows={"14:25": 1990.0})
+    sig = at(wick, strategy("m5"), t25)
+    assert sig is not None
+    assert sig.stop_loss == 1987.0
+    # The setup bar must itself be a decision time (14:15 here is not; 14:00 is no setup).
+    assert at(store, strategy("m5", allowed=lambda t: t != T0), t25) is None
+    # A bar that is not a decision time cannot trigger, so it does not spend the setup either.
+    not_25 = strategy("m5", allowed=lambda t: t != t25)
+    assert at(store, not_25, t25) is None
+    late_trigger = at(store, not_25, t30)
+    assert late_trigger is not None
+    assert late_trigger.reasons[0].startswith("M15 setup at 14:15Z")
+
+    # The regime is re-checked as of the trigger: the 15:00 H1 close below EMA_H1 ends it.
+    falling = {
+        f"{14 + (20 + 5 * i) // 60}:{(20 + 5 * i) % 60:02d}": 2008.0 - 0.5 * i for i in range(9)
+    }
+    late = {**falling, "15:05": 2005.0}  # > high(15:00) 2004.50 and > EMA20(14:45) ~2003.73
+    t105 = m5_times("15:05")[0]
+    kept = m5_store(late, [2010.0, 2005.5], h1_extra=[2006.0])
+    trigger = at(kept, strategy("m5"), t105)
+    assert trigger is not None
+    assert trigger.reasons[0].startswith("M15 setup at 14:45Z")
+    assert at(m5_store(late, [2010.0, 2005.5], h1_extra=[1990.0]), strategy("m5"), t105) is None
+
 
 def test_invalidation_only_on_completed_h1_closes_after_the_decision() -> None:
     hourly_closes = [2000.0] * FLAT + [2001.0, 2002.0, 2003.0, 2004.0, 2005.0]
@@ -291,11 +334,13 @@ def test_invalidation_only_on_completed_h1_closes_after_the_decision() -> None:
         position_id=1, symbol="XAUUSD", side=Side.BUY, volume=0.01, open_price=2009.2,
         open_time=T0, stop_loss=sig.stop_loss,
     )  # fmt: skip
-    s = strategy()
-    for extra, now, invalid in (
-        ([1990.0], T0 + timedelta(minutes=30), False),  # the 15:00 bar has not closed yet
-        ([1990.0], T0 + timedelta(minutes=45), True),  # it has, below EMA_H1
-        ([at_ema], T0 + timedelta(minutes=45), False),  # equal: strict
+    before = series(Timeframe.H1, [*hourly_closes[:-1], 1990.0], T0.replace(minute=0))
+    for hourly, now, invalid in (
+        (h1([1990.0]), T0 + timedelta(minutes=30), False),  # the 15:00 bar has not closed yet
+        (h1([1990.0]), T0 + timedelta(minutes=45), True),  # it has, below EMA_H1
+        (h1([at_ema]), T0 + timedelta(minutes=45), False),  # equal: strict
+        (before, T0 + timedelta(minutes=30), False),  # 14:00 closed before the decision
     ):
-        view = BarStore({Timeframe.H1: h1(extra)}).view_at(now)
-        assert (s.invalidation(view, pos, sig) is not None) is invalid, (extra, now)
+        view = BarStore({Timeframe.H1: hourly}).view_at(now)
+        # A fresh instance per market: indicator values are cached per bar of one market.
+        assert (strategy().invalidation(view, pos, sig) is not None) is invalid, now

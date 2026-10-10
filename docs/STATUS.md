@@ -135,6 +135,16 @@ _Last updated: 2026-10-10._
    stop bounds, restart restoration.
 7. **Run the 54 development trials.** Every trial goes in the ledger, including failures and
    rejected-setup counts. **Claude stops for review before this first P&L-producing step.**
+   **Ready for that review (2026-10-10):**
+   - **Spec audit:** an independent read-only audit found no deviation or ambiguity. Two of
+     its notes were applied: the strategy checks decision times itself, and M15 gaps are
+     counted for m5.
+   - **Mutation test:** 22 targeted rule mutations (strict comparisons, windows, rounding
+     directions, expiry order, one use, regime at the trigger, invalidation window) are all
+     caught by `tests/unit/test_trend_pullback.py`. The only survivor is an equivalent mutant:
+     the decision-time check in `on_bar` duplicates the one in the trigger and setup rules.
+   - **Real-data trace:** development-period bars reproduce the spec trace at
+     2024-03-01 14:15Z exactly (no P&L computed).
 8. **Evaluate only the registered thresholds**; never open the sealed period.
 9. **Phase 3b replay only when triggered**; link the worst- and best-case runs.
 10. **Select or reject the family**, only after all development and walk-forward evidence.
