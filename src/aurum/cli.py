@@ -808,9 +808,15 @@ def backtest_parity(
     ],
     time_tolerance_ms: Annotated[int, typer.Option(help="Fill time tolerance")] = 1000,
     price_tolerance_points: Annotated[float, typer.Option(help="Price tolerance")] = 1.0,
-    money_tolerance: Annotated[float, typer.Option(help="Profit/commission tolerance")] = 0.02,
+    money_tolerance: Annotated[
+        float, typer.Option(help="Per-trade profit/commission tolerance")
+    ] = 0.02,
+    cumulative_money_tolerance: Annotated[
+        float, typer.Option(help="Tolerance on the total net P&L of the whole run")
+    ] = 0.02,
 ) -> None:
-    """Compare a run with the MT5 Strategy Tester's trades; exit 0 only if all are within
+    """Compare a run with the MT5 Strategy Tester's trades; exit 0 only if the trade counts are
+    equal, every trade is within tolerance and the total net P&L is within the cumulative
     tolerance. Writes parity.csv and parity.json next to the run."""
     from aurum.adapters.mt5.servertime import ServerTimeZone
     from aurum.adapters.mt5.tester import read_tester_deals
@@ -834,6 +840,7 @@ def backtest_parity(
             time=timedelta(milliseconds=time_tolerance_ms),
             price_points=price_tolerance_points,
             money=money_tolerance,
+            cumulative_money=cumulative_money_tolerance,
         ),
         window=(date.fromisoformat(manifest["first"]), date.fromisoformat(manifest["last"])),
     )
@@ -852,6 +859,16 @@ def backtest_parity(
             f"{d.name} {d.aurum} vs {d.tester} ({d.difference})" for d in row.diffs
         )
         console.print(f"{row.key[0]} {row.key[1]}: {what}")
+    if not report.trade_count_matches:
+        console.print(
+            f"[red]trade count: aurum {report.aurum_trades} vs tester {report.tester_trades}[/red]"
+        )
+    if not report.cumulative_net_pnl_within_tolerance:
+        console.print(
+            f"[red]total net P&L: aurum {report.total_net_pnl_aurum:.2f} vs tester "
+            f"{report.total_net_pnl_tester:.2f} ({report.total_net_pnl_difference:+.2f} > "
+            f"{report.tolerance.cumulative_money:.2f})[/red]"
+        )
     console.print(f"details: {runs.parity(run_id)}")
     if not report.ok:
         raise typer.Exit(1)

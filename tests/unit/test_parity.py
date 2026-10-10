@@ -1,5 +1,6 @@
 """Parity with the MT5 Strategy Tester: comparison, the EA's deals CSV, and the CLI."""
 
+import json
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -40,7 +41,38 @@ def trade(**kw: object) -> ParityTrade:
 def test_identical_trades_pass() -> None:
     report = compare([trade()], [trade()], point=0.01)
     assert report.ok
-    assert report.summary()["within_tolerance"] == 1
+    summary = report.summary()
+    assert summary["within_tolerance"] == 1
+    assert (summary["aurum_trades"], summary["tester_trades"]) == (1, 1)
+    assert summary["trade_count_matches"] is True
+    assert summary["total_net_pnl_aurum"] == summary["total_net_pnl_tester"] == -101.46
+    assert summary["total_net_pnl_difference"] == 0.0
+    assert summary["cumulative_money_tolerance"] == 0.02
+    assert summary["cumulative_net_pnl_within_tolerance"] is True
+
+
+def test_cumulative_net_pnl_gate() -> None:
+    """Cent differences each within the per-trade 0.02 must not add up past 0.02 in total."""
+
+    def days(n: int, extra_profit: float = 0.0) -> list[ParityTrade]:
+        return [
+            trade(
+                entry_time=trade().entry_time + timedelta(days=d),
+                exit_time=trade().exit_time + timedelta(days=d),
+                profit=trade().profit + extra_profit,
+            )
+            for d in range(n)
+        ]
+
+    at_limit = compare(days(2), days(2, 0.01), point=0.01)  # total -0.02: exactly at tolerance
+    assert at_limit.total_net_pnl_difference == -0.02
+    assert at_limit.ok
+    beyond = compare(days(3), days(3, 0.01), point=0.01)  # one cent beyond
+    assert all(r.ok for r in beyond.rows)  # every trade within its own tolerance
+    assert beyond.trade_count_matches
+    assert beyond.total_net_pnl_difference == -0.03
+    assert not beyond.cumulative_net_pnl_within_tolerance
+    assert not beyond.ok
 
 
 def test_differences_beyond_tolerance_are_listed() -> None:
@@ -74,6 +106,16 @@ def test_unpaired_trades_on_either_side() -> None:
     assert [r.key for r in report.only_aurum] == [(date(2026, 9, 15), Side.SELL)]
     assert [r.key for r in report.only_tester] == [(date(2026, 9, 16), Side.BUY)]
     assert report.frame()["status"].to_list() == ["ok", "only_aurum", "only_tester"]
+    # Equal counts with different pairing keys still fail; totals include unmatched trades.
+    assert report.trade_count_matches
+    assert not report.ok
+    assert report.total_net_pnl_aurum == report.total_net_pnl_tester == -202.92
+    # Unequal counts fail explicitly, even though the one matched pair agrees.
+    extra = compare([trade()], [trade(), next_day], point=0.01)
+    assert (extra.aurum_trades, extra.tester_trades) == (1, 2)
+    assert not extra.trade_count_matches
+    assert extra.rows[0].ok
+    assert not extra.ok
 
 
 def test_tester_trades_outside_the_run_window_are_ignored() -> None:
@@ -82,6 +124,9 @@ def test_tester_trades_outside_the_run_window_are_ignored() -> None:
     report = compare([trade()], [trade(), next_day], point=0.01, window=(day, day))
     assert report.ok
     assert report.summary()["tester_outside_window"] == 1
+    # Excluded from the count and the totals as well.
+    assert report.tester_trades == 1
+    assert report.total_net_pnl_tester == report.total_net_pnl_aurum
 
 
 def test_two_trades_on_one_key_is_an_error() -> None:
@@ -178,7 +223,9 @@ def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
     return data, runs
 
 
-def csv_from_run(path: Path, trades: list[ParityTrade], nudge_points: int = 0) -> Path:
+def csv_from_run(
+    path: Path, trades: list[ParityTrade], nudge_points: int = 0, nudge_profit: float = 0.0
+) -> Path:
     rows = []
     for n, t in enumerate(trades):
         out_side = "SELL" if t.side is Side.BUY else "BUY"
@@ -207,7 +254,7 @@ def csv_from_run(path: Path, trades: list[ParityTrade], nudge_points: int = 0) -
                 exit_price,
                 reason=reason,
                 ea_reason=ea,
-                profit=t.profit,
+                profit=t.profit + nudge_profit,
             )
         )
     return write_csv(path, rows)
@@ -226,7 +273,21 @@ def test_parity_cli_end_to_end(env: tuple[Path, Path], tmp_path: Path) -> None:
     ok = runner.invoke(app, ["backtest", "parity", run_id, str(same)])
     assert ok.exit_code == 0, ok.output
     assert RunLayout(runs).parity(run_id).is_file()
-    assert RunLayout(runs).parity_summary(run_id).is_file()
+    summary = json.loads(RunLayout(runs).parity_summary(run_id).read_text(encoding="utf-8"))
+    assert summary["ok"] is True
+    assert summary["trade_count_matches"] is True
+    assert summary["aurum_trades"] == summary["tester_trades"] == 4
+    assert summary["total_net_pnl_difference"] == 0.0
+    assert summary["cumulative_money_tolerance"] == 0.02
+    assert summary["cumulative_net_pnl_within_tolerance"] is True
+    assert {"total_net_pnl_aurum", "total_net_pnl_tester"} <= summary.keys()
+
+    # +0.01 on each of the 4 trades: every trade within 0.02, the total (0.04) is not.
+    drift = csv_from_run(tmp_path / "drift.csv", trades, nudge_profit=0.01)
+    only_total = runner.invoke(app, ["backtest", "parity", run_id, str(drift)])
+    assert only_total.exit_code == 1
+    assert "total net P&L" in only_total.output
+    assert "exit_price" not in only_total.output
 
     off = csv_from_run(tmp_path / "off.csv", trades, nudge_points=5)
     bad = runner.invoke(app, ["backtest", "parity", run_id, str(off)])

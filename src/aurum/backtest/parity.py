@@ -11,6 +11,14 @@ Default tolerances (proposed in reports/phase_3.md, the owner may tighten them):
 * the same exit reason;
 * booked profit and commission within 0.02 (both round each deal to cents).
 
+Two run-level gates on top (owner decision 2026-10-10):
+
+* the trade counts inside the window are **equal** (an explicit invariant, not a by-product of
+  pairing);
+* total net P&L (profit - commission over **every** in-window trade on each side, matched or
+  not) differs by at most ``cumulative_money`` (0.02), a separate absolute tolerance, so
+  per-trade cent differences cannot add up unnoticed over a long run.
+
 Anything outside them is a difference to explain, never something to tune away.
 """
 
@@ -45,12 +53,19 @@ class ParityTrade:
     def key(self) -> tuple[date, Side]:
         return self.entry_time.date(), self.side
 
+    @property
+    def net(self) -> float:
+        return self.profit - self.commission
+
 
 @dataclass(frozen=True, slots=True)
 class Tolerance:
     time: timedelta = timedelta(seconds=1)
     price_points: float = 1.0
     money: float = 0.02
+    """Per trade: booked profit and commission (account currency)."""
+    cumulative_money: float = 0.02
+    """Whole run: total net P&L (account currency). Never derived from the trade count."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,23 +118,61 @@ class ParityReport:
         return [r for r in self.rows if not r.ok]
 
     @property
+    def aurum_trades(self) -> int:
+        return sum(1 for r in self.rows if r.aurum is not None)
+
+    @property
+    def tester_trades(self) -> int:
+        """In-window tester trades."""
+        return sum(1 for r in self.rows if r.tester is not None)
+
+    @property
+    def trade_count_matches(self) -> bool:
+        return self.aurum_trades == self.tester_trades
+
+    @property
+    def total_net_pnl_aurum(self) -> float:
+        return round(sum(r.aurum.net for r in self.rows if r.aurum is not None), 2)
+
+    @property
+    def total_net_pnl_tester(self) -> float:
+        return round(sum(r.tester.net for r in self.rows if r.tester is not None), 2)
+
+    @property
+    def total_net_pnl_difference(self) -> float:
+        """Aurum minus tester."""
+        return round(self.total_net_pnl_aurum - self.total_net_pnl_tester, 2)
+
+    @property
+    def cumulative_net_pnl_within_tolerance(self) -> bool:
+        return abs(self.total_net_pnl_difference) <= self.tolerance.cumulative_money + 1e-9
+
+    @property
     def ok(self) -> bool:
-        return all(r.ok for r in self.rows)
+        """Equal counts, every trade paired and within the field tolerances, and the totals
+        within the cumulative tolerance."""
+        return (
+            self.trade_count_matches
+            and all(r.ok for r in self.rows)
+            and self.cumulative_net_pnl_within_tolerance
+        )
 
     def summary(self) -> dict[str, Any]:
-        both = [r for r in self.rows if r.aurum is not None and r.tester is not None]
-        aurum_pnl = sum(r.aurum.profit - r.aurum.commission for r in both if r.aurum)
-        tester_pnl = sum(r.tester.profit - r.tester.commission for r in both if r.tester)
         return {
-            "aurum_trades": sum(1 for r in self.rows if r.aurum is not None),
-            "tester_trades": sum(1 for r in self.rows if r.tester is not None),
+            "ok": self.ok,
+            "aurum_trades": self.aurum_trades,
+            "tester_trades": self.tester_trades,
+            "trade_count_matches": self.trade_count_matches,
             "matched": self.matched,
             "within_tolerance": self.within_tolerance,
             "only_aurum": len(self.only_aurum),
             "only_tester": len(self.only_tester),
             "tester_outside_window": self.tester_outside_window,
-            "matched_net_pnl_aurum": round(aurum_pnl, 2),
-            "matched_net_pnl_tester": round(tester_pnl, 2),
+            "total_net_pnl_aurum": self.total_net_pnl_aurum,
+            "total_net_pnl_tester": self.total_net_pnl_tester,
+            "total_net_pnl_difference": self.total_net_pnl_difference,
+            "cumulative_money_tolerance": self.tolerance.cumulative_money,
+            "cumulative_net_pnl_within_tolerance": self.cumulative_net_pnl_within_tolerance,
             "tolerance_seconds": self.tolerance.time.total_seconds(),
             "tolerance_points": self.tolerance.price_points,
             "tolerance_money": self.tolerance.money,
@@ -145,12 +198,8 @@ class ParityReport:
                     "tester_entry": r.tester.entry_time if r.tester else None,
                     "aurum_exit_reason": str(r.aurum.exit_reason) if r.aurum else None,
                     "tester_exit_reason": str(r.tester.exit_reason) if r.tester else None,
-                    "aurum_net": (
-                        round(r.aurum.profit - r.aurum.commission, 2) if r.aurum else None
-                    ),
-                    "tester_net": (
-                        round(r.tester.profit - r.tester.commission, 2) if r.tester else None
-                    ),
+                    "aurum_net": round(r.aurum.net, 2) if r.aurum else None,
+                    "tester_net": round(r.tester.net, 2) if r.tester else None,
                     "diffs": "; ".join(
                         f"{d.name}: aurum {d.aurum} vs tester {d.tester} ({d.difference})"
                         for d in r.diffs
@@ -237,7 +286,8 @@ def compare(
     """Pair trades by (UTC entry date, side) and list every field outside ``tolerance``.
 
     ``window`` (first, last UTC entry date, inclusive): tester trades outside it are counted
-    and ignored, so a tester period one day longer than the run is not a difference.
+    and ignored (in the trade count and the totals too), so a tester period one day longer
+    than the run is not a difference.
     """
     tol = tolerance or Tolerance()
     inside = [t for t in tester if window is None or window[0] <= t.entry_time.date() <= window[1]]
