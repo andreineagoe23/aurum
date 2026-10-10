@@ -15,7 +15,7 @@ _Last updated: 2026-10-10._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** `docs/strategies/trend_pullback.md` **0.2.0 approved and pre-registered** 2026-10-10 (D6 b). Building sealed-period protection, warm-up by bar count and the strategy; no P&L-producing run yet (queue A2) | — |
+| 5 Strategy lab | **In progress.** `docs/strategies/trend_pullback.md` **0.2.0 approved and pre-registered** 2026-10-10 (D6 b). The 54 development trials have run (2026-10-10, amendment A1 period). The post-batch assessment is written; it is provisional and awaits review. No final candidate selected (queue A2) | — |
 
 ## Work queue (in order)
 
@@ -245,7 +245,42 @@ _Last updated: 2026-10-10._
    - Open point for later, not now: the null baseline in "Phase 5 conditions" covers
      2020-11-12 … 2026-10-08. A like-for-like comparison would rerun it over 2020-12-15 …
      2025-09-30. That is an extra evaluation and needs approval.
+   **Done (2026-10-10).** The reviewer approved the pin, A1 and the 54 points on `9afdf37`.
+   - m15 ran 14:40:58–15:08:47Z and m5 ran 15:08:59–15:43:37Z, one after the other, with
+     `uv run --no-sync`.
+   - Each batch has 27 attempts, all succeeded, 0 retries and 27 trials: 54 points, 54
+     attempts, 54 trials in all. All run files are published and hash-verified; nothing is
+     staged. Sealed openings 0, parity accesses 0.
+   - Context hashes: m15 `2c9968b7…`, m5 `51552400…`. They differ only by `variant`.
+   - Evidence: `docs/strategies/evidence/trend_pullback_2026-10-10_dev_batch.md`, plus
+     `_index.csv` (54 rows) and `_contexts.json`.
+   - Backups: pre-run `…1422Z_before…` (unchanged) and post-run
+     `C:\aurum-data\ledger\backups\trials_20261010T1600Z_after_trend_pullback_dev_grid.sqlite`
+     (sha256 `1a140ad3…`).
 8. **Evaluate only the registered thresholds**; never open the sealed period.
+   **Post-batch assessment written (2026-10-10), provisional, for review.** The pipeline
+   already computed each trial's simulated P&L and summary metrics. This step applies the
+   registered section 16 rules to the existing 54 runs, without simulating.
+   - File: `docs/strategies/evidence/trend_pullback_2026-10-10_dev_analysis.md`, plus
+     `_points.csv`.
+   - Code: `scripts/trend_pullback_dev_analysis.py` (read-only, reproducible byte for byte)
+     and `aurum.validation.walkforward` (selection, ties, drawdown, neighbours, DSR), tested.
+   - The anchored walk-forward uses only trades entered before each fold, with ≥ 100 trades
+     and exact tie-breaks. The selected points are:
+     - m15: (80, 1, 2), (50, 0.5, 1.5), (30, 0.5, 1.5), (30, 0.25, 2);
+     - m5: (80, 0.5, 1.5), (50, 0.25, 1.5), (50, 0.25, 1.5), (80, 0.25, 2).
+
+     There were no ties.
+   - Concatenated OOS: m15 has 698 trades, −0.36 USD/trade, PF 0.955; m5 has 685 trades,
+     +0.98 USD/trade, PF 1.119.
+   - Gates failed:
+     - m15 fails 2, 3, 4, 7, 8, 9 and 12;
+     - m5 fails 9 (`london_morning` −0.08 USD/trade) and 12 (DSR 0.343 < 0.95).
+   - Not evaluated: gates 5 and 11 (stress and replay not authorised) and gate 10 on the
+     frozen configuration (final selection not authorised; the neighbourhood is shown for
+     information only).
+   - Under section 16 each variant already fails at least one evaluated gate. The reviewer
+     decides what follows. No final candidate is selected.
 9. **Phase 3b replay only when triggered**; link the worst- and best-case runs.
 10. **Select or reject the family**, only after all development and walk-forward evidence.
 
@@ -315,7 +350,7 @@ Nothing in the spec changes after step 7 starts. If every trial fails, the resul
     deliberately;
   - never work around this by editing file timestamps.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
-- Test suite: 410 tests (401 passed, 9 skipped on the VM: 6 live-market checks with the market
-  closed, 2 demo-order tests, 1 non-Windows test), ~2 min with coverage, 92.16% combined on
-  the VM (2026-10-10, after the third Phase 5 review). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 382 passed,
+- Test suite: 413 tests (404 passed, 9 skipped on the VM: 6 live-market checks with the market
+  closed, 2 demo-order tests, 1 non-Windows test), ~2 min with coverage, 92.13% combined on
+  the VM (2026-10-10, after the Phase 5 development analysis). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 382 passed,
   11 skipped, 91.97% (item 6).
