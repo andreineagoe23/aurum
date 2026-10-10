@@ -15,7 +15,7 @@ _Last updated: 2026-10-10._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **Started 2026-10-10** (reviewer approved f561a4d). All six pre-Phase-5 items done. First step: `docs/strategies/trend_pullback.md` **DRAFT 0.1.0, awaiting owner approval** (its section 0 decisions); no strategy code, no backtest of it | — |
+| 5 Strategy lab | **Started 2026-10-10** (reviewer approved f561a4d). All six pre-Phase-5 items done. First step: `docs/strategies/trend_pullback.md` **DRAFT 0.2.0, not approved**: D1/D2 approved, D3 provisionally, D4/D5/D6 open. No strategy code, no backtest of it. Next code (after approval): sealed-period tooling and warm-up by bar count, before any strategy code | — |
 
 ## Work queue (in order)
 
@@ -118,6 +118,25 @@ _Last updated: 2026-10-10._
    - No README badge: the repo is private, so the badge image does not render outside GitHub
      sessions with access.
 
+### A2. Phase 5 queue (in order; nothing starts before the spec is approved)
+
+1. **Approve `docs/strategies/trend_pullback.md`.** Review 2026-10-10: D1 (sealed
+   2025-10-01 … 2026-10-08) and D2 (cap 2,000 points) approved, D3 (minimum 500 points)
+   provisionally; D4 (54-trial grid), D5 (thresholds) and D6 (timeout from decision vs fill)
+   pending on 0.2.0.
+2. **Sealed-period tooling** (spec §16, before strategy implementation):
+   - boundaries in machine-readable config;
+   - normal backtest/report commands refuse the range;
+   - an explicit `--open-sealed`;
+   - a journal of when, why and by whom;
+   - opening allowed once, after the configuration is frozen;
+   - the exact-tick subset reported separately.
+3. **Warm-up by bar count** (spec §3: 503 H1 / 507 M15 bars), replacing calendar
+   `warmup_days` for strategies that need it. No decisions, trades or metrics in warm-up.
+4. If D6 = (a): `max_hold` measured from the fill time in the engine, with golden and parity
+   impact re-checked.
+5. Then strategy code, the 54 trials, and the Phase 5 report for trend_pullback.
+
 ### B. Later, tracked
 
 - Adopted positions (state file lost) get no timeout/invalidation, only force-flat + kill
@@ -142,14 +161,15 @@ _Last updated: 2026-10-10._
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Review and approve `docs/strategies/trend_pullback.md`** (DRAFT 0.1.0): decisions D1–D5 in
-  its section 0. It becomes the pre-registered spec only after approval.
+- **Review `docs/strategies/trend_pullback.md` 0.2.0**: D4, D5, D6 and the time/window
+  semantics. 0.1.0 is 6f371d2 (pushed at the reviewer's request); 0.2.0 answers the review's
+  rule questions.
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
 - Write each strategy spec (`docs/STRATEGY_SPEC_TEMPLATE.md`) **before any code**, including the
   stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
-  reviewer's request, awaiting approval. Then opening-range breakout and VWAP reversion, one at
+  reviewer's request, 0.2.0 awaiting approval (queue A2). Then opening-range breakout and VWAP reversion, one at
   a time.
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
