@@ -750,8 +750,9 @@ def backtest_grid(
     ] = False,
 ) -> None:
     """Run the strategy's declared search grid: one ledger attempt per point, every outcome
-    kept. Points that succeeded earlier are not rerun; failed ones only with --retry-failed.
-    Exits 1 while any point is unresolved."""
+    kept. The batch is frozen to its first run's evaluation context; a changed context is
+    refused. Points with a trial are never rerun; failed ones only with --retry-failed.
+    Exits 1 while any point is unresolved or has unpublished run files."""
     from aurum.backtest.grid import run_grid
 
     settings = _settings_or_exit()
@@ -777,9 +778,29 @@ def backtest_grid(
         table.add_row(params, r.status, r.attempt_id or "", r.trial_id or r.detail)
     console.print(table)
     unresolved = [r for r in results if r.status in ("failed", "not retried")]
-    console.print(f"{len(results)} points: {len(results) - len(unresolved)} resolved, "
-                  f"{len(unresolved)} unresolved")  # fmt: skip
-    if unresolved:
+    pending = [r for r in results if r.status == "artifacts pending"]
+    resolved = len(results) - len(unresolved)
+    console.print(f"{len(results)} points: {resolved} resolved, {len(unresolved)} unresolved, "
+                  f"{len(pending)} with artifacts pending")  # fmt: skip
+    if pending:
+        console.print("run `aurum backtest recover` to publish the staged run files")
+    if unresolved or pending:
+        raise typer.Exit(1)
+
+
+@backtest_app.command("recover")
+def backtest_recover() -> None:
+    """Publish the staged run files of recorded trials whose run was not published (after a
+    write failure or a crash). Runs no evaluation and writes no ledger row; exits 1 if any
+    trial's files cannot be recovered (the trial stands)."""
+    from aurum.backtest.pipeline import recover_artifacts
+
+    settings = _settings_or_exit()
+    found = recover_artifacts(settings, _runs(settings))
+    for r in found:
+        console.print(f"{r.trial_id} {r.run_id}: {r.status}")
+    console.print(f"{len(found)} unpublished runs")
+    if any(r.status != "published" for r in found):
         raise typer.Exit(1)
 
 

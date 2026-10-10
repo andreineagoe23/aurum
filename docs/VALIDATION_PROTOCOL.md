@@ -16,12 +16,26 @@ Rules from MASTER_PROMPT Phases 5-6 and section 4 rules 9-11. Implementation det
 - Reports must state the total trial count. The count feeds the Deflated Sharpe Ratio.
 - **Attempts** (`attempts`, `attempt_outcomes`): every evaluation is recorded before it runs and
   ends as a trial or as a failure with its stage and error. A crash leaves it `unfinished`.
-  - Invalid requests and sealed refusals are not attempts.
-  - A retry names the failed or unfinished attempt it repeats (same grid point, once) and is
-    never another grid point.
+  - Invalid requests (an empty period included), sealed refusals and requests the data store
+    cannot serve are not attempts. The period is checked before any journal, opening or
+    attempt row is written.
+  - Each attempt carries its **frozen evaluation context**, resolved before it starts: code
+    (the `aurum` source tree by content, installed distributions, Python), the spec document's
+    hash, the config hash with the effective costs, risk and account values, the symbol
+    snapshot (name and content), the input data (hash over every planned file, warm-up
+    included), the declared grid and the dates.
+  - A grid batch is frozen to the context of its first run (`grid_batches`). Any later run or
+    retry under another context is refused before any attempt, naming the changed parts.
+  - A retry names the failed or unfinished attempt it repeats (same grid point and context,
+    once) and is never another grid point.
+  - A success stages the run files, then records the trial and the success outcome in one
+    transaction; a batch point can have only one trial (unique index). A point with a trial is
+    never evaluated again, whatever its attempts say. Files that were not published stay
+    staged; `aurum backtest recover` publishes them after checking their hashes against the
+    trial. It runs nothing and writes no ledger row.
   - `aurum backtest grid` runs only a strategy's declared grid. Done points are skipped,
     failed ones are retried only with `--retry-failed`, and it exits non-zero while any point
-    is unresolved.
+    is unresolved or has unpublished files.
 - TODO(Phase 6): ledger schema extensions for fold-level results and report linkage.
 
 ## Intra-bar sensitivity and the Phase 3b trigger (Phase 5 report contract)

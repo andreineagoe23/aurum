@@ -83,6 +83,8 @@ def resolve_access(
     code_version: str | None,
     clock: ClockPort,
 ) -> SealedAccess:
+    if request.last < request.first:  # before anything is journalled
+        raise ValueError(f"empty period {request.first}..{request.last}")
     sealed = cfg.backtest.sealed_period
     span = f"{sealed.first}..{sealed.last}"
     whole = ((sealed.first, sealed.last),)

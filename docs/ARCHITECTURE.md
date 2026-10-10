@@ -36,8 +36,8 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `strategies` | `base` contract (Signals only; `warmup_bars`, `diagnostics`), `reference.FixedTimeReference` (parity/null strategy), `trend_pullback.TrendPullback` (Phase 5 family 1, spec 0.2.0; fixed rules as constants, only the declared grid as params), `registry` (config → strategy) |
 | `risk` | `base` (`RiskEngine`, `RiskContext`), `policy.PolicyRiskEngine` (sizing + every gate, ADR-0010), `fixed.FixedVolumeRisk` (tester parity only) |
 | `execution` | `engine.Engine` (the per-step decision loop for every mode), `orders.OrderManager` (only send path), `intents` (SQLite intent store), `reconcile`, `killswitch` (ADR-0011) |
-| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (config → attempt → run → trial; failures kept with their stage), `grid` (a strategy's declared search grid as one auditable batch; skip done, explicit linked retries), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` (refuses sealed-period files before reading), `sealed` (sealed final-test guard and its one-time journalled opening) |
-| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed trial rows; `attempts` + `attempt_outcomes` (every evaluation, failed or unfinished included, retries linked); `sealed_openings` (once per strategy and variant) and `parity_accesses` journals |
+| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (`prepare`: validation + frozen evaluation context → attempt → staged run → trial and success in one transaction → publish; failures kept with their stage; `recover_artifacts`), `grid` (a strategy's declared search grid as one batch frozen to its context; points with a trial never rerun, explicit linked retries), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` (`plan_market` lists every input file and refuses sealed ones before reading; `read_market`), `sealed` (sealed final-test guard and its one-time journalled opening) |
+| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed trial rows; `attempts` (with their evaluation context) + `attempt_outcomes` (every evaluation, failed or unfinished included, retries linked); `grid_batches` (context frozen per batch); one trial per batch point (unique index); `sealed_openings` (once per strategy and variant) and `parity_accesses` journals |
 | `monitoring` | `logging` (structlog JSON, secret redaction), `doctor`, `watchdog` (heartbeat → kill switch) |
 | `apps` | `collector` (live ticks, Windows); `shadow`, `trader` are Phase 7/8 placeholders |
 | `validation` | `phase3b` (Phase 3b trigger on a candidate's worst/best intra-bar runs, ADR-0009 §9); walk-forward and DSR are Phase 6 |
@@ -63,11 +63,14 @@ any action) → kill switch → flat phases close everything (FORCE_FLAT) → ou
 pending entries → per position TIMEOUT / INVALIDATION → in OPEN at a decision-timeframe close:
 strategy → risk → `OrderManager.submit`. A disconnect ends the step; the next step retries.
 
-**Backtest** (`aurum backtest run` → `backtest/pipeline.py`): load the Phase 2 store for the
-period → `SimBroker` + `Engine` + risk engine → `runner.run_backtest` wakes at M5 closes, phase
-boundaries and `max_hold` deadlines; at each wake the broker first processes quotes before `t`,
-then the engine decides on bars closed by `t` → `accounting` → `reports/runs/<run_id>/` with
-output hashes → one trial-ledger row. Reruns must be byte-identical (`aurum backtest compare`).
+**Backtest** (`aurum backtest run` → `backtest/pipeline.py`): `prepare` validates the request,
+resolves sealed access and plans every input file (warm-up included) into the frozen evaluation
+context → ledger attempt → read the Phase 2 store → `SimBroker` + `Engine` + risk engine →
+`runner.run_backtest` wakes at M5 closes, phase boundaries and `max_hold` deadlines; at each wake
+the broker first processes quotes before `t`, then the engine decides on bars closed by `t` →
+`accounting` → files staged under `reports/runs/.staging/<run_id>/` → trial + success outcome in
+one transaction → renamed to `reports/runs/<run_id>/`. A failed publish leaves the trial and the
+staged files (`aurum backtest recover`). Reruns must be byte-identical (`aurum backtest compare`).
 
 **Data** (Phase 2): `aurum data backfill` (raw ticks/bars, immutable) and `aurum data collect`
 (live ticks) → `aurum data resample` (normalized ticks, canonical bars; ticks used only on days
@@ -82,7 +85,7 @@ resent) → broker re-checks approval and runs `core.safety` on a fresh `account
 ## CLI
 
 `aurum doctor` · `mt5 ping|symbols|bars` · `data depth|backfill|collect|qa|resample|spreads|hashes`
-· `backtest run|grid|report|compare|parity` · `ledger list` · `kill` / `unkill` / `watchdog` ·
+· `backtest run|grid|recover|report|compare|parity` · `ledger list` · `kill` / `unkill` / `watchdog` ·
 placeholders (exit 2): `validate walkforward`, `shadow run`, `trade demo`.
 
 ## Tests (`tests/`)
@@ -101,7 +104,7 @@ placeholders (exit 2): `validate walkforward`, `shadow run`, `trade demo`.
 | `property/test_session_properties.py`, `…timeframe…`, `…servertime…` | DST and time rules swept over years against independent oracles |
 | `unit/test_sim_broker.py` | Fill prices, intra-bar worst-case rules, rejections |
 | `unit/test_trend_pullback.py` | trend_pullback 0.2.0 rules on exact synthetic bars: equality boundaries, gaps, stop bounds and rounding, M5 window/expiry/replacement/one use/restart, H1 invalidation |
-| `unit/test_backtest_cli.py` | Backtest end to end on a synthetic store; sealed-period refusal and one-time opening; warm-up by bar count |
+| `unit/test_backtest_cli.py` | Backtest end to end on a synthetic store; sealed-period refusal and one-time opening; warm-up by bar count; grid batches frozen to their evaluation context; recorded trials recovered, never re-evaluated; empty periods leave no ledger row |
 | `integration/test_mt5_smoke.py` | Real terminal (Windows only; orders need `AURUM_MT5_ORDER_TESTS=1`) |
 
 Helpers: `factories.py` (models), `fake_mt5.py` (fake `MetaTrader5` module), `simdata.py`

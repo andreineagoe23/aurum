@@ -45,6 +45,10 @@ class LedgerError(AurumError):
     """The trial ledger rejected an operation."""
 
 
+class ContextMismatchError(LedgerError):
+    """A grid batch or retry would continue under another frozen evaluation context."""
+
+
 class SealedPeriodError(AurumError):
     """A research backtest would read the sealed final-test period without its one-time,
     journalled opening (docs/VALIDATION_PROTOCOL.md)."""
@@ -57,3 +61,17 @@ class EvaluationFailedError(AurumError):
         super().__init__(f"attempt {attempt_id} failed at {stage}: {type(cause).__name__}: {cause}")
         self.attempt_id = attempt_id
         self.stage = stage
+
+
+class ArtifactsPendingError(AurumError):
+    """A trial and its success are recorded, but the run's files were not published; they stay
+    staged for ``aurum backtest recover`` (the evaluation is never run again)."""
+
+    def __init__(self, attempt_id: str, trial_id: str, run_id: str, cause: BaseException) -> None:
+        super().__init__(
+            f"attempt {attempt_id} recorded trial {trial_id}, but run {run_id} was not "
+            f"published ({type(cause).__name__}: {cause}); run `aurum backtest recover`"
+        )
+        self.attempt_id = attempt_id
+        self.trial_id = trial_id
+        self.run_id = run_id

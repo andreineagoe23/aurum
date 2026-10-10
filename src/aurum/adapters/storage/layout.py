@@ -131,6 +131,11 @@ class RunLayout:
     def run_dir(self, run_id: str) -> Path:
         return self.root / run_id
 
+    def staging_dir(self, run_id: str) -> Path:
+        """Where a run's files are written before its trial is recorded; renamed to
+        ``run_dir`` once the trial and its outcome are in the ledger."""
+        return self.root / ".staging" / run_id
+
     def manifest(self, run_id: str) -> Path:
         return self.run_dir(run_id) / "manifest.json"
 

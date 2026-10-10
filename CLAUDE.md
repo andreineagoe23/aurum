@@ -81,9 +81,13 @@ Its job is to tell the truth, not to make backtests look good.
 - Backtests (Phase 3): strategies see only a `MarketView` of bars closed by `now`; the runner
   wakes at M5 closes, phase boundaries and `max_hold` deadlines; `SimBroker` fills on the first
   quote at or after `now + latency`. Bar-only days use the worst-case intra-bar rule and flag the
-  trade (`intrabar_rule`, `worst_case`). Every evaluation is a ledger attempt first (failures
-  keep their stage; retries are linked, never new grid points); a success records a trial and writes
-  `reports/runs/<id>/` (git-ignored) with output hashes; reruns must be byte-identical
+  trade (`intrabar_rule`, `worst_case`). Every evaluation is a ledger attempt first, carrying
+  its frozen context (code, spec, config, costs/risk, symbol snapshot, input data with warm-up,
+  grid, dates); a grid batch or retry under another context is refused. Failures keep their
+  stage; retries are linked, never new grid points. A success stages its files, records trial +
+  outcome in one transaction (one trial per batch point), then publishes `reports/runs/<id>/`
+  (git-ignored); a recorded point is never evaluated again (`aurum backtest recover` publishes
+  staged files). Reruns must be byte-identical
   (`aurum backtest compare`). Warm-up is loaded by the strategy's `warmup_bars` count, not
   calendar days.
 - Sealed final-test period (`backtest.yaml` `sealed_period`, 2025-10-01 … 2026-10-08): no

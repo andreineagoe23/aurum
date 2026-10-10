@@ -9,8 +9,10 @@
 * Backtests pass the sealed final-test period as ``forbidden`` date ranges: any data file dated
   inside one is refused **before it is read** (`SealedPeriodError`), whether it would serve
   warm-up, the period or the extra end day.
-* A SHA-256 over every input file (path relative to the data dir + file hash), recorded in the
-  run manifest so a result can be tied to the exact data it saw.
+* ``plan_market`` resolves every input file first (directory listings and warm-up row counts
+  only); its SHA-256 over every file (path relative to the data dir + file hash) is the
+  evaluation's input-data identity, warm-up included, known before the evaluation starts.
+  ``read_market`` then reads exactly those files.
 """
 
 import hashlib
@@ -34,15 +36,28 @@ TIMEFRAMES = (Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.H1)
 
 
 @dataclass(frozen=True)
-class LoadedMarket:
-    market: HistoricalMarket
-    files: list[Path]
-    """Every input file, sorted."""
-    tick_days: list[date]
-    bar_days: list[date]
-    """Days in ``first..last`` with M1 bars but no exact ticks (BARS mode)."""
+class MarketPlan:
+    """Every input file of one backtest, resolved before any of them is read."""
+
+    symbol: str
+    first: date
+    last: date
+    bars: dict[Timeframe, list[Path]]
+    day_manifest: Path
+    tick_files: dict[date, Path]
+    """Days in ``first..last`` with exact normalized ticks."""
     first_data_day: date
     """Start of the load range: the earliest UTC day any bar file could come from."""
+
+    @property
+    def files(self) -> list[Path]:
+        """Every input file, sorted."""
+        bars = [p for paths in self.bars.values() for p in paths]
+        return sorted([*bars, self.day_manifest, *self.tick_files.values()])
+
+    @property
+    def tick_days(self) -> list[date]:
+        return sorted(self.tick_files)
 
     def data_hash(self, root: Path) -> str:
         h = hashlib.sha256()
@@ -50,6 +65,26 @@ class LoadedMarket:
             h.update(f.relative_to(root).as_posix().encode())
             h.update(sha256_file(f).encode())
         return h.hexdigest()
+
+
+@dataclass(frozen=True)
+class LoadedMarket:
+    market: HistoricalMarket
+    plan: MarketPlan
+    bar_days: list[date]
+    """Days in ``first..last`` with M1 bars but no exact ticks (BARS mode)."""
+
+    @property
+    def files(self) -> list[Path]:
+        return self.plan.files
+
+    @property
+    def tick_days(self) -> list[date]:
+        return self.plan.tick_days
+
+    @property
+    def first_data_day(self) -> date:
+        return self.plan.first_data_day
 
 
 class TickLoader:
@@ -70,20 +105,18 @@ class TickLoader:
         )
 
 
-def load_market(
+def plan_market(
     layout: DataLayout,
     symbol: str,
     *,
-    point: float,
     first: date,
     last: date,
     warmup_days: int,
-    bar_spread_extra_points: int,
     last_data_day: date | None = None,
     forbidden: Sequence[tuple[date, date]] = (),
     warmup_bars: Mapping[Timeframe, int] | None = None,
     warmup_before: date | None = None,
-) -> LoadedMarket:
+) -> MarketPlan:
     """``last_data_day`` defaults to ``last + 1`` (UTC). ``forbidden``: date ranges no file may
     come from.
     ``warmup_bars``: completed bars per timeframe needed from whole UTC days before
@@ -100,10 +133,6 @@ def load_market(
                 f"refusing to read {symbol} data dated in the sealed period ({hit[0]}, "
                 f"requested {lo}..{hi})"
             )
-
-    def allowed(paths: list[Path], days: list[date]) -> list[Path]:
-        refuse_sealed(days)
-        return paths
 
     for tf, needed in (warmup_bars or {}).items():
         before = warmup_before or first
@@ -123,46 +152,80 @@ def load_market(
                 f"only {counted} in the store"
             )
 
-    files: list[Path] = []
-    bars: dict[Timeframe, BarSeries] = {}
-    planned: dict[Timeframe, list[Path]] = {}
+    bars: dict[Timeframe, list[Path]] = {}
     for tf in TIMEFRAMES:  # every date is checked before any file is read
         wanted = [d for d in days_in(layout.canonical_bars_dir(symbol, tf)) if lo <= d <= hi]
-        planned[tf] = allowed([layout.canonical_bars(symbol, tf, d) for d in wanted], wanted)
-    for tf, paths in planned.items():
-        if not paths:
+        refuse_sealed(wanted)
+        if not wanted:
             raise FileNotFoundError(f"no canonical {tf} bars for {symbol} in {lo}..{hi}")
+        bars[tf] = [layout.canonical_bars(symbol, tf, d) for d in wanted]
+    manifest_path = layout.day_manifest(symbol)
+    days = read_parquet(manifest_path, DAY_SOURCES)
+    exact = sorted(
+        d
+        for d in days.filter(pl.col("tick_fidelity") == "exact")["day"].to_list()
+        if first <= d <= last and layout.normalized_ticks(symbol, d).is_file()
+    )
+    refuse_sealed(exact)
+    return MarketPlan(
+        symbol=symbol,
+        first=first,
+        last=last,
+        bars=bars,
+        day_manifest=manifest_path,
+        tick_files={d: layout.normalized_ticks(symbol, d) for d in exact},
+        first_data_day=lo,
+    )
+
+
+def read_market(
+    layout: DataLayout, plan: MarketPlan, *, point: float, bar_spread_extra_points: int
+) -> LoadedMarket:
+    """Read exactly the planned files."""
+    bars: dict[Timeframe, BarSeries] = {}
+    for tf, paths in plan.bars.items():
         df = pl.read_parquet(paths).sort("open_time")
         if df.columns != CANONICAL_BARS.names:
             raise ValueError(f"canonical {tf} bars have columns {df.columns}")
         bars[tf] = BarSeries.from_frame(tf, df)
-        files.extend(paths)
-
-    manifest_path = layout.day_manifest(symbol)
-    days = read_parquet(manifest_path, DAY_SOURCES)
-    files.append(manifest_path)
-    exact = {
-        d
-        for d in days.filter(pl.col("tick_fidelity") == "exact")["day"].to_list()
-        if first <= d <= last and layout.normalized_ticks(symbol, d).is_file()
-    }
-    files.extend(
-        allowed([layout.normalized_ticks(symbol, d) for d in sorted(exact)], sorted(exact))
-    )
     m1_open = bars[Timeframe.M1].open_time.astype("datetime64[ms]").astype("datetime64[D]")
-    m1_days = {d for d in np.unique(m1_open).astype(date).tolist() if first <= d <= last}
+    m1_days = {d for d in np.unique(m1_open).astype(date).tolist() if plan.first <= d <= plan.last}
+    exact = frozenset(plan.tick_files)
     market = HistoricalMarket(
-        symbol=symbol,
+        symbol=plan.symbol,
         point=point,
         bars=bars,
-        tick_days=frozenset(exact),
-        tick_loader=TickLoader(layout, symbol) if exact else None,
+        tick_days=exact,
+        tick_loader=TickLoader(layout, plan.symbol) if exact else None,
         bar_spread_extra_points=bar_spread_extra_points,
     )
-    return LoadedMarket(
-        market=market,
-        files=sorted(files),
-        tick_days=sorted(exact),
-        bar_days=sorted(m1_days - exact),
-        first_data_day=lo,
+    return LoadedMarket(market=market, plan=plan, bar_days=sorted(m1_days - exact))
+
+
+def load_market(
+    layout: DataLayout,
+    symbol: str,
+    *,
+    point: float,
+    first: date,
+    last: date,
+    warmup_days: int,
+    bar_spread_extra_points: int,
+    last_data_day: date | None = None,
+    forbidden: Sequence[tuple[date, date]] = (),
+    warmup_bars: Mapping[Timeframe, int] | None = None,
+    warmup_before: date | None = None,
+) -> LoadedMarket:
+    """``plan_market`` then ``read_market``."""
+    plan = plan_market(
+        layout,
+        symbol,
+        first=first,
+        last=last,
+        warmup_days=warmup_days,
+        last_data_day=last_data_day,
+        forbidden=forbidden,
+        warmup_bars=warmup_bars,
+        warmup_before=warmup_before,
     )
+    return read_market(layout, plan, point=point, bar_spread_extra_points=bar_spread_extra_points)

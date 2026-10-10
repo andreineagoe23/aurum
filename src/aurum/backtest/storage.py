@@ -3,6 +3,10 @@
 The Parquet outputs (trades, equity, journal) are deterministic: the same code, config and data
 give byte-identical files, so a re-run can be checked by hash (Phase 3 exit gate). The manifest
 records their SHA-256 together with the code commit, config hash and data hash.
+
+A run is written to ``RunLayout.staging_dir`` first and renamed into place only after its trial
+is in the ledger (``publish_run``), so a write failure never leaves a trial without its files
+being recoverable, and a published run always has a trial.
 """
 
 import json
@@ -34,7 +38,7 @@ def _json(path: Path, body: dict[str, Any]) -> None:
     )
 
 
-def write_run(
+def stage_run(
     runs: RunLayout,
     run_id: str,
     *,
@@ -44,21 +48,35 @@ def write_run(
     manifest: dict[str, Any],
     summary: dict[str, Any],
 ) -> dict[str, str]:
-    """Write every file of a run; returns the SHA-256 of each Parquet output (also stored in
-    the manifest under ``outputs``). Refuses to overwrite an existing run."""
-    run_dir = runs.run_dir(run_id)
-    run_dir.mkdir(parents=True, exist_ok=False)
-    write_parquet(trades, runs.trades(run_id), BACKTEST_TRADES, overwrite=False)
-    write_parquet(equity, runs.equity(run_id), BACKTEST_EQUITY, overwrite=False)
-    write_parquet(journal, runs.journal(run_id), BACKTEST_JOURNAL, overwrite=False)
-    hashes = {
-        "trades": sha256_file(runs.trades(run_id)),
-        "equity": sha256_file(runs.equity(run_id)),
-        "journal": sha256_file(runs.journal(run_id)),
-    }
-    _json(runs.summary(run_id), summary)
-    _json(runs.manifest(run_id), {**manifest, "run_id": run_id, "outputs": hashes})
+    """Write every file of a run into its staging directory (before its trial is recorded);
+    returns the SHA-256 of each Parquet output (also in the manifest under ``outputs``)."""
+    staged = runs.staging_dir(run_id)
+    staged.mkdir(parents=True, exist_ok=False)
+    paths = {name: staged / f"{name}.parquet" for name in OUTPUTS}
+    write_parquet(trades, paths["trades"], BACKTEST_TRADES, overwrite=False)
+    write_parquet(equity, paths["equity"], BACKTEST_EQUITY, overwrite=False)
+    write_parquet(journal, paths["journal"], BACKTEST_JOURNAL, overwrite=False)
+    hashes = {name: sha256_file(path) for name, path in paths.items()}
+    _json(staged / "summary.json", summary)
+    _json(staged / "manifest.json", {**manifest, "run_id": run_id, "outputs": hashes})
     return hashes
+
+
+def publish_run(runs: RunLayout, run_id: str, *, trial_id: str, outputs: dict[str, str]) -> None:
+    """Move a staged run to ``run_dir`` once its trial is recorded: adds the trial id to the
+    manifest, checks the staged outputs against the hashes recorded with the trial, renames.
+    Refuses to overwrite an existing run."""
+    staged = runs.staging_dir(run_id)
+    if runs.run_dir(run_id).exists():
+        raise FileExistsError(f"run {run_id} already exists under {runs.root}")
+    if not (staged / "manifest.json").is_file():
+        raise FileNotFoundError(f"no staged files for run {run_id}")
+    found = {name: sha256_file(staged / f"{name}.parquet") for name in OUTPUTS}
+    if found != outputs:
+        raise ValueError(f"staged outputs of run {run_id} differ from those recorded")
+    manifest = json.loads((staged / "manifest.json").read_text(encoding="utf-8"))
+    _json(staged / "manifest.json", {**manifest, "trial_id": trial_id})
+    staged.rename(runs.run_dir(run_id))
 
 
 def read_manifest(runs: RunLayout, run_id: str) -> dict[str, Any]:
