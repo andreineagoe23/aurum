@@ -8,6 +8,8 @@
 >   had been computed when it was approved. The only data used were the descriptive counts in
 >   sections 8a and 15 and the trace in section 17, all from the development period (bar
 >   close ≤ 2025-09-30).
+> - **Amendment A1 (2026-10-10, pre-results):** the evaluated trading period is 2020-12-15 …
+>   2025-09-30. Earlier development history is warm-up only (section 16). No rule changed.
 > - **Frozen.** No rule, parameter, threshold or grid change is accepted after the first
 >   P&L-producing run. Any change is a new version that restarts the development evaluation.
 >   If all 54 trials fail, the result is "trend_pullback 0.2.0 failed"; the thresholds are not
@@ -324,8 +326,9 @@ M15 ATR(14) median was 201–286 points in 2021–2024 and 443 in 2025. Expect m
 | `target_r` | R | 1.5 | 1.0–2.0 | {1.0, 1.5, 2.0} | Must be reachable within 180 minutes; above 2R rarely is intraday |
 
 - **Trials:** 2 variants × 3 `h1_ema` × 3 `stop_atr_mult` × 3 `target_r` = **54**.
-- **One trial** = one backtest run of one grid point of one variant over the whole development
-  period (warm-up excluded), recorded in the ledger. Fold statistics are slices of that run by
+- **One trial** = one backtest run of one grid point of one variant over the evaluated trading
+  period 2020-12-15 … 2025-09-30 (warm-up excluded; amendment A1, section 16), recorded in the
+  ledger. Fold statistics are slices of that run by
   entry date, not extra trials.
 - **Not counted as trials:** the stress re-runs and the best-case intra-bar replay of a
   selected configuration. They are linked to their trial in the ledger.
@@ -364,7 +367,36 @@ Fixed (not searched; a change is a version bump):
 
 **Periods and sealing (D1, approved).**
 
-- Development: 2020-11-12 … 2025-09-30. Sealed: 2025-10-01 … 2026-10-08 (bar dates, UTC).
+- Development data available: 2020-11-12 … 2025-09-30. Sealed: 2025-10-01 … 2026-10-08
+  (bar dates, UTC).
+- **Evaluated trading period: 2020-12-15 … 2025-09-30** (amendment A1 below). Earlier
+  development history is warm-up only.
+
+**Amendment A1: evaluation period (2026-10-10, pre-results).** Approved by the owner's reviewer
+(option A) after the approved grid command was refused before any attempt.
+
+- **Why.** The store starts on 2020-11-12, and section 3 needs 504 H1, 509 M15 and 3 M5
+  completed bars before the first decision. Read literally, a trading start of 2020-11-12 had
+  no warm-up, and the loader refused it rather than shorten the warm-up.
+- **Earliest feasible start.** 504 H1 bars are complete only at the end of Mon 2020-12-14, so
+  the first trading date is Tue 2020-12-15. The evidence (metadata-only row counts, the refused
+  log and the loader's plans) is in
+  `docs/strategies/evidence/trend_pullback_2026-10-10_warmup_preflight.md`.
+- **Changed.**
+  - Evaluated trading period 2020-12-15 … 2025-09-30, every trial and both variants.
+  - Initial balance 10,000 USD at 2020-12-15.
+  - Training-only window 2020-12-15 … 2021-09-30.
+- **Unchanged.**
+  - The OOS folds.
+  - The development data range: 2020-11-12 … 2020-12-14 is warm-up only, with no decision,
+    signal, trade or metric.
+  - Every strategy rule, grid value, cost, risk setting and threshold, and the warm-up
+    requirement. No older history was backfilled.
+- **Pre-results.** No trend_pullback trial, P&L or outcome existed when this was decided:
+  the ledger had no attempt.
+- **Snapshot.** Both variants are bound to one symbol snapshot, by file name and content hash
+  (`configs/backtest.yaml` `symbol_snapshot`: `20261010T000046Z.json`, sha256 `0426cf8c…be0c7ee`).
+  It is never "the latest".
 - **Before strategy implementation**, tooling must:
   - record the sealed boundaries in machine-readable config;
   - make every normal backtest/report command refuse a range that touches them;
@@ -380,7 +412,7 @@ Fixed (not searched; a change is a version bump):
 
 | Window | Dates |
 |---|---|
-| Training only | 2020-11-12 … 2021-09-30 |
+| Training only | 2020-12-15 … 2021-09-30 (amendment A1; was 2020-11-12) |
 | OOS fold 1 | 2021-10-01 … 2022-09-30 |
 | OOS fold 2 | 2022-10-01 … 2023-09-30 |
 | OOS fold 3 | 2023-10-01 … 2024-09-30 |
@@ -414,8 +446,8 @@ Win rate is reported but is **not** a criterion.
 
 - **Trade P&L** = the booked net P&L in USD (profit + commission, all costs included) from the
   trades table of the trial run it came from.
-  - Each trial run starts at 10,000 USD on 2020-11-12 and is sized by the risk engine on its
-    own equity.
+  - Each trial run starts at 10,000 USD on 2020-12-15 (amendment A1; was 2020-11-12) and is
+    sized by the risk engine on its own equity.
   - Nothing is rescaled, and walk-forward slices keep their run's sizing.
 - **Slicing.** A trade belongs to a fold, month, session and direction by its **entry decision
   time** (UTC). Session = the session of that decision time.
@@ -538,3 +570,4 @@ why version 0.1.0 tied the hold window to the 8 swing bars.
 | 0.2.0 | 2026-10-10 | Exact time/window/equality semantics; float-safe price-grid rounding; searched parameters by name (`EMA_H1`, `stop_atr_mult`, `target_r`); setup bars must be decision times; same-instant replacement rule; bar-only fill rule (ADR-0009 §4); warm-up 504 H1 / 509 M15 / 3 M5; D6 (a) fully specified; measurement definitions for every threshold (closed-trade drawdown, entry-time slicing, per-side and per-session minimums, neighbour counts 6/5/4/3, exact DSR formula); trace lists all 8 lows; consecutive-bar rule (`data_gap`); m5 window boundaries, session truncation, replacement, one use, stateless derivation; m5 swing includes the M5 bars since the last M15 close; fill vs `ref`; invalidation only on completed H1 bars; exit precedence delegated to the simulator; signal priority; D3 wording; D6 (timeout start); sealing conditions; trial definition; D5 thresholds expanded (aggregate P&L, drawdown, session, neighbourhood rule, DSR, sealed untouched) | Review of 0.1.0 (owner's reviewer, 2026-10-10) and an independent read-only audit of the 0.2.0 text; still draft, no results seen |
 | 0.2.0 (approved) | 2026-10-10 | Approval recorded; D6 = (b); timeout wording "signal-to-exit"; status, header and section 0. **No rule changed.** | Owner approval of `b9baf4c` |
 | 0.2.0 (clarified) | 2026-10-10 | Defines the `data_gap` diagnostic (section 16, Reported): one per decision time with a missing bar in the variant's read set. **No rule changed.** | Implementation review (2026-10-10) |
+| 0.2.0 (amendment A1) | 2026-10-10 | Pre-results evaluation-period amendment (section 16): evaluated trading period 2020-12-15 … 2025-09-30, initial balance 10,000 USD at 2020-12-15, training-only window from 2020-12-15. 2020-11-12 … 12-14 is warm-up only. OOS folds, rules, grid, costs, risk, thresholds and the warm-up requirement are unchanged. Both variants are bound to one pinned symbol snapshot. **No rule changed.** | The approved grid command was refused before any attempt: no warm-up history before 2020-11-12. Reviewer approved option A |
