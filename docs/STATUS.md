@@ -27,11 +27,13 @@ _Last updated: 2026-10-10._
    BUY, ask for a SELL) to each stop, plus exit commission and stop slippage; a stopless
    position or a missing/stale quote rejects. Fault test
    `test_a_trade_that_would_overrun_the_daily_limit_is_rejected`.
-2. **Parity check additions** (`backtest/parity.py`, `aurum backtest parity`). Keep tolerances
-   (1 s fill time, 1 point price, same exit reason, $0.02 money). Add: trade count must match
-   **exactly**; total net P&L within a small **cumulative** tolerance. Never loosen a tolerance
-   to pass — find the cause. Doc for the tester run must state: same commission, leverage,
-   deposit, and "Every tick based on real ticks" (`docs/strategies/reference_fixed_time.md`).
+2. ~~**Parity check additions**~~ — **done**. `ParityReport.ok` = equal in-window trade counts
+   (explicit `trade_count_matches`) + every trade paired and within field tolerances (1 s,
+   1 point, same exit reason, $0.02) + |Σ net Aurum − Σ net tester| ≤
+   `Tolerance.cumulative_money` ($0.02, separate, never count × $0.02), totals over every
+   in-window trade. `parity.json` carries counts, totals, difference, tolerance and booleans.
+   The tester settings that must match (commission, leverage, deposit, modelling, delays) are
+   a table in `docs/strategies/reference_fixed_time.md`. Never loosen a tolerance to pass.
 3. **Cancel inside a bar** (Phase 4 known issue 7): flag it as a worst-case case now
    (an `IntrabarRule`, like `close_bar`) instead of an unflagged assumption. Golden scenario.
 4. **Phase 3b (Dukascopy) trigger** — record in ADR-0008/0009 and enforce in the Phase 5 report:
@@ -49,6 +51,8 @@ _Last updated: 2026-10-10._
 
 - Adopted positions (state file lost) get no timeout/invalidation, only force-flat + kill
   switch. Acceptable on demo; **fix before any live pilot** (Phase 4 issue 5).
+- If Aurum ever trades several symbols at once, `risk.policy.open_risk()` must take a fresh
+  quote and `SymbolSpec` per position's symbol instead of one shared `Tick`/`SymbolSpec`.
 - Margin estimate vs `order_calc_margin` — Phase 8 (Phase 4 issue 1).
 - Watchdog scheduling waits for the Phase 7/8 trader loops (Phase 4 issue 6).
 - Add each year's FOMC dates to `configs/risk.yaml` in time (`aurum doctor` warns 60 days
@@ -59,7 +63,7 @@ _Last updated: 2026-10-10._
 - **Tester run**: second MT5 in portable mode (`terminal64.exe /portable`, separate folder, own
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
-  <deals.csv>`.
+  <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
 - **Mac checks**: `uv run ruff check && uv run mypy && uv run pytest` (only ever run on the VM).
 
 ## Phase 5 conditions (from the reviewer; part of the gate)

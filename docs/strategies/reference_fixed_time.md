@@ -43,18 +43,47 @@ Aurum run: `20261009T221629Z_reference_fixed_time_m5_be6c94` (38 trades), made w
 uv run aurum backtest run reference_fixed_time --from 2026-09-14 --to 2026-10-08 --variant m5 --latency-ms 0 --slippage-points 0 --risk fixed
 ```
 
-Trades are paired by UTC entry date and side. Proposed tolerances (`aurum backtest parity` options):
+Trades are paired by UTC entry date and side. Tolerances (owner-confirmed 2026-10-10;
+`aurum backtest parity` options):
 
-| Field | Tolerance |
+| Check | Tolerance |
 |---|---|
+| trade count inside the window | **exactly equal** |
 | entry and exit fill times | 1 s |
 | entry/exit price, stop, target | 1 point (0.01) |
 | exit reason | identical |
-| booked profit, commission | 0.02 account currency |
+| booked profit, commission (per trade) | 0.02 account currency |
+| total net P&L over all in-window trades | 0.02 account currency (`--cumulative-money-tolerance`, separate, never `count × 0.02`) |
 
-Any difference outside these is listed and must be explained, not tuned away.
+Any difference outside these is listed and must be explained, not tuned away. A tolerance is
+never loosened to make a run pass; if a legitimate larger difference is found, its cause is
+recorded first.
+
+### Tester settings that must match Aurum's run
+
+Most parity mismatches come from these settings, not from engine bugs. Check each before
+comparing:
+
+| Setting | Must be | Aurum's value comes from |
+|---|---|---|
+| Modelling | Every tick based on real ticks | — |
+| Delays | Zero latency, ideal execution | `--latency-ms 0 --slippage-points 0` |
+| Deposit | 10000 USD | `backtest.yaml initial_balance` |
+| Leverage | 1:500 | `backtest.yaml leverage` |
+| Commission | 2.25 USD per lot per side (0.23 per deal at 0.10 lots) | `broker.yaml commission` |
+| Volume | 0.10 lots | `backtest.yaml fixed_volume_lots`, `--risk fixed` |
+
+Verify the commission in the deals CSV: every deal must show `-0.23`. If it shows `0.00`, the
+tester is not applying the account's commission. Fix the tester setup before comparing; don't
+accept it as an explained difference.
 
 ### Steps (Windows, in the Fusion MT5 terminal logged in to demo 504691)
+
+The live tick collector runs in the main terminal; don't stop it. Run the tester in a **second
+MT5 installed in portable mode** in its own folder (`terminal64.exe /portable`), which has its
+own data directory: "Data Folder" below is then the portable install's folder. The EA writes
+its CSV with `FILE_COMMON`; check where it lands with a portable install (expected:
+`%APPDATA%\MetaQuotes\Terminal\Common\Files`, else under the portable folder) and send that path.
 
 1. **Install the EA.** In MT5, choose *File > Open Data Folder*. Copy
    `C:\code\aurum\mql5\AurumReference.mq5` into `MQL5\Experts\Aurum\` (create the `Aurum` folder).
@@ -90,7 +119,8 @@ Any difference outside these is listed and must be explained, not tuned away.
 uv run aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94 "%APPDATA%\MetaQuotes\Terminal\Common\Files\AurumReference_deals.csv"
 ```
 
-Exit code 0 means every trade is within tolerance. Otherwise each difference is printed and
+Exit code 0 means equal trade counts, every trade within tolerance and the total net P&L
+within the cumulative tolerance. Otherwise each difference is printed and
 written to `reports/runs/<run_id>/parity.csv` (summary in `parity.json`). The EA's times are
 converted to UTC by Aurum's `ServerTimeZone` (ADR-0004), not by the EA, so a mistake in the
 EA's own clock arithmetic shows up as an entry-time difference instead of being hidden.
@@ -98,8 +128,8 @@ EA's own clock arithmetic shows up as an entry-time difference instead of being 
 ### Differences to expect, and how they would be explained
 
 - **Commission.** If the tester does not apply the account's commission, every trade differs
-  by 0.46 (2 x 0.23 at 0.10 lots). That is an explained difference: the price-level fields still
-  have to match.
+  by 0.46 (2 x 0.23 at 0.10 lots) and the cumulative gate fails. That is a setup error, not a
+  result: fix the tester's commission (see the settings table) and rerun.
 - **Stop fills.** Aurum fills a stop at the bid/ask of the first tick that reaches it, so a jump
   through the stop is paid in full. If the tester fills at the stop price instead, exit prices
   differ by the jump size on those trades, and Aurum is the more conservative of the two.
