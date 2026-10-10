@@ -1,5 +1,6 @@
 """Unit tests for the aurum CLI."""
 
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -26,14 +27,11 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(REPO_ROOT)
 
 
-def test_doctor_ok() -> None:
+def test_doctor(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     result = runner.invoke(app, ["doctor"])
     assert result.exit_code == 0, result.output
     assert "python" in result.output
     assert "config" in result.output
-
-
-def test_doctor_fails_on_empty_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     empty = tmp_path / "empty_cfg"
     empty.mkdir()
     monkeypatch.setenv("AURUM_CONFIG_DIR", str(empty))
@@ -42,12 +40,9 @@ def test_doctor_fails_on_empty_config(monkeypatch: pytest.MonkeyPatch, tmp_path:
     assert "FAIL" in result.output
 
 
-@pytest.mark.parametrize(
-    "args",
-    [["trade", "demo"], ["shadow", "run"]],
-)
-def test_placeholders_exit_2(args: list[str]) -> None:
-    assert runner.invoke(app, args).exit_code == 2
+def test_placeholders_exit_2() -> None:
+    for args in (["trade", "demo"], ["shadow", "run"]):
+        assert runner.invoke(app, args).exit_code == 2, args
 
 
 # --------------------------------------------------------------------------- mt5 (fake terminal)
@@ -76,9 +71,6 @@ def test_mt5_ping(fake_terminal: FakeMT5) -> None:
     assert "USD" in result.output
     assert "VERIFIED" in result.output
     assert "UTC+3.00h" in result.output
-
-
-def test_mt5_ping_connect_failure_exits_1(fake_terminal: FakeMT5) -> None:
     fake_terminal.initialize_results = [False, False, False]
     result = runner.invoke(app, ["mt5", "ping"])
     assert result.exit_code == 1
@@ -92,13 +84,10 @@ def test_mt5_symbols_writes_snapshot(fake_terminal: FakeMT5, tmp_path: Path) -> 
     assert len(list((tmp_path / "specs" / "XAUUSD").glob("*.json"))) == 1
 
 
-def test_ledger_list_no_ledger() -> None:
+def test_ledger_list(tmp_path: Path) -> None:
     result = runner.invoke(app, ["ledger", "list"])
     assert result.exit_code == 0, result.output
     assert "No ledger yet" in result.output
-
-
-def test_ledger_list_with_trial(tmp_path: Path) -> None:
     with TrialLedger(tmp_path / "ledger" / "trials.sqlite") as lg:
         lg.record_trial(
             strategy="zebra_strategy",
@@ -113,7 +102,24 @@ def test_ledger_list_with_trial(tmp_path: Path) -> None:
     assert "zebra_strategy" in result.output
 
 
-def test_data_collect_runs_and_stops(fake_terminal: FakeMT5, tmp_path: Path) -> None:
+class _MovingClock:
+    """Starts at the fake terminal's instant and advances with wall time."""
+
+    def __init__(self, start: datetime) -> None:
+        self._start, self._t0 = start, time.monotonic()
+
+    def now(self) -> datetime:
+        return self._start + timedelta(seconds=time.monotonic() - self._t0)
+
+
+def test_data_collect_runs_and_stops(
+    fake_terminal: FakeMT5, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The collector reads the system clock; pin it (and the fake terminal) to one moving clock
+    # so the test doesn't depend on today's date.
+    clock = _MovingClock(fake_terminal.now())
+    fake_terminal.now = clock.now  # type: ignore[method-assign]
+    monkeypatch.setattr("aurum.apps.collector.SystemClock", lambda: clock)
     ms = fake_terminal._server_ms()
     fake_terminal.tick_rows = [
         {"time_msc": ms - 2000 + i * 100, "bid": 4142.7, "ask": 4142.8} for i in range(10)
