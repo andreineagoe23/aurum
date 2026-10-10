@@ -1,44 +1,45 @@
 # trend_pullback — strategy spec
 
-> **Status: DRAFT 0.2.0, not pre-registered.** Written 2026-10-10 from
-> `docs/STRATEGY_SPEC_TEMPLATE.md`. It becomes binding only when the owner approves it,
-> including the decisions in section 0. No strategy code exists yet. No backtest, P&L or
-> outcome of these rules has been computed. The only data used are the descriptive counts in
-> sections 8a and 15 and the trace in section 17, all from the development period (bar
-> close ≤ 2025-09-30).
+> **Status: APPROVED 0.2.0, pre-registered** by the owner on 2026-10-10. The approved text is
+> commit `b9baf4c`; later edits are labelled, not rule changes. The owner's approval was of
+> the reported specification, not a line-by-line review of that diff.
+>
+> - Written from `docs/STRATEGY_SPEC_TEMPLATE.md`. No backtest, P&L or outcome of these rules
+>   had been computed when it was approved. The only data used were the descriptive counts in
+>   sections 8a and 15 and the trace in section 17, all from the development period (bar
+>   close ≤ 2025-09-30).
+> - **Frozen.** No rule, parameter, threshold or grid change is accepted after the first
+>   P&L-producing run. Any change is a new version that restarts the development evaluation.
+>   If all 54 trials fail, the result is "trend_pullback 0.2.0 failed"; the thresholds are not
+>   adjusted.
 
-## 0. Decisions for the owner (part of approval)
+## 0. Decisions (approved 2026-10-10)
 
-| # | Decision | Proposed | Review 2026-10-10 |
-|---|---|---|---|
-| D1 | Sealed final-test period | 2025-10-01 … 2026-10-08 | **Approved**, with the sealing conditions in section 16 |
-| D2 | Stop-size cap | 2,000 points (ceiling 2,490) | **Approved**: reject the setup, never shorten the stop |
-| D3 | Minimum stop | 500 points | **Provisionally approved**: a fixed strategy rule, not proof that Phase 3b stays under 1% |
-| D4 | Search grid | 2 variants × 3 × 3 × 3 = 54 trials (section 14) | Pending review of the exact grid |
-| D5 | Pass thresholds | Section 16 | Pending review of the exact thresholds |
-| D6 | When `max_hold` starts | See below | **New, open** |
+| # | Decision | Approved choice |
+|---|---|---|
+| D1 | Sealed final-test period | 2025-10-01 … 2026-10-08, with the sealing conditions in section 16 |
+| D2 | Stop-size cap | 2,000 points (ceiling 2,490): reject the setup, never shorten the stop |
+| D3 | Minimum stop | 500 points: a fixed strategy rule, not proof that Phase 3b stays under 1% |
+| D4 | Search grid | 2 variants × 3 × 3 × 3 = 54 trials (section 14) |
+| D5 | Pass thresholds | Section 16, unchanged after results |
+| D6 | Timeout start | **(b) `Signal.time`**: deadline = `Signal.time + 180 min` |
 
-**D6.** The review asked for the timeout to run from the simulated fill time.
+**D6 (b): signal-to-exit timeout.**
 
-- **What the engine does today:** it measures `max_hold` from `Signal.time`, the decision
-  instant, for every strategy and mode (`aurum/execution/engine.py:249`, deadline
-  `signal.time + max_hold`). `reference_fixed_time` and its MT5 tester mirror use the same
-  semantics.
-- **The gap between the two:** the fill comes `latency` after the decision (200 ms by
-  default), and at most `max_quote_wait_seconds` (60 s) before the order is rejected.
-- **Options:**
-  - **(a) Measure from the fill.** An engine change for every strategy:
-    - the deadline is the broker-reported entry deal time + `max_hold` (the `SimBroker` fill
-      quote time; the MT5 deal time on demo);
-    - after a restart it is re-derived from the broker's position open time, never local state;
-    - a position that closes before the deadline needs no timeout;
-    - the golden scenarios with timeouts and the reference parity expectations must be
-      re-checked and their reasons recorded.
-  - **(b) Keep decision-time semantics** and state them here. A difference of at most 60 s
-    within a 180-minute hold.
-- **Claude recommends (b)**, because one time rule across strategies, modes and the tester
-  parity check matters more than a ≤ 60 s difference. The owner decides. Section 10 is written
-  for both.
+- `max_hold` is a **maximum decision age**: the position is closed once 180 minutes have
+  passed since the decision instant `Signal.time`. It is not strictly a holding time from the
+  fill. This is the engine's existing rule for every strategy and mode
+  (`aurum/execution/engine.py`), and the MT5 tester mirror uses it too.
+- **The signal timestamp is persisted** with the intent (`execution/intents.py`, SQLite).
+  After a restart the deadline is rebuilt from it. A position found past its deadline is
+  closed at the first step; it never gets a fresh 180 minutes.
+- **An entry cannot fill late.** `OrderManager` refuses intents older than
+  `max_intent_age_seconds` (60 s), and a market order with no quote within
+  `max_quote_wait_seconds` (60 s) is rejected.
+- **Not changed per strategy.** A future strategy with pending orders that can stay unfilled
+  for meaningful time must specify a separate, fill-based position timeout. This global rule
+  is not changed retrospectively.
+- Option (a), measuring from the fill, was not chosen.
 
 ## 1. Identity
 
@@ -47,7 +48,7 @@
 - Variant: `m15` (enter on the M15 close) and `m5` (M15 setup + M5 trigger). These are two
   variants of one declared family search; sections 6 and 7 differ, everything else is the
   same.
-- Version: `0.2.0` (draft)
+- Version: `0.2.0` (approved 2026-10-10, commit `b9baf4c`)
 - Author: Claude (draft) for Andrei Neagoe
 - Date: 2026-10-10
 
@@ -268,13 +269,12 @@ M15 ATR(14) median was 201–286 points in 2021–2024 and 443 in 2025. Expect m
   (bid + spread + slippage) and not at `ref`, the realised reward-to-risk is slightly below R.
   That is accepted and measured, not corrected.
 
-## 10. Timeout / max holding time
+## 10. Timeout (signal-to-exit, D6 b)
 
 - `max_hold = 180 minutes`. At expiry the engine closes the position at market (TIMEOUT); the
   close fills on the next quote after latency.
-- **Start of the clock: D6.** Under (b) it is `Signal.time` (engine today). Under (a) it is the
-  broker-reported entry deal time, re-derived after a restart from the position's open time
-  (section 0).
+- **Start of the clock:** `Signal.time` (D6 b). The deadline is `Signal.time + 180 min`, rebuilt
+  from the persisted signal after a restart, and never restarted (section 0).
 - Force-flat (section 12) applies first if it comes earlier.
 
 ## 11. Invalidation and exit precedence
@@ -501,7 +501,7 @@ newest M15 bar at 14:15Z = T, and `data_as_of = T`.
 | Target: x = ref + target_r (1.5) × 5.39; floor(round(x / point, 6)) × point | 2054.40 + 8.085 = 2062.485 → 2062.48 | |
 | Final decision | | `Signal(BUY, market, time 14:15:00Z, stop 2049.01, target 2062.48, max_hold 180 min)` |
 | Fill | first quote at or after 14:15:00.200Z, at its ask + 5 points slippage (not 2054.40) | |
-| Timeout | 17:15:00Z under D6 (b); fill time + 180 min under (a) | |
+| Timeout (signal-to-exit) | `Signal.time` + 180 min = 17:15:00Z (D6 b) | |
 
 **Rejected example, same day:** at 10:15Z a 4-bar-only hold check would have fired, but closes
 at 08:45Z–09:15Z (inside b0…b7) were below M15 EMA50. Rule 5.3 → no signal. This example is
@@ -525,7 +525,7 @@ why version 0.1.0 tied the hold window to the 8 swing bars.
 - **News.** The blackout windows protect entries, not open positions. A position open across a
   13:30 London release takes the full move to its stop, paid in full on gaps.
 - **Implementation prerequisites** (not strategy rules): warm-up by bar count (section 3) and
-  sealed-period tooling (section 16). D6 (a) would also need an engine change.
+  sealed-period tooling (section 16).
 
 ## 19. Change log
 
@@ -533,3 +533,4 @@ why version 0.1.0 tied the hold window to the 8 swing bars.
 |---|---|---|---|
 | 0.1.0 | 2026-10-10 | Initial draft (6f371d2) | Phase 5 start |
 | 0.2.0 | 2026-10-10 | Exact time/window/equality semantics; float-safe price-grid rounding; searched parameters by name (`EMA_H1`, `stop_atr_mult`, `target_r`); setup bars must be decision times; same-instant replacement rule; bar-only fill rule (ADR-0009 §4); warm-up 504 H1 / 509 M15 / 3 M5; D6 (a) fully specified; measurement definitions for every threshold (closed-trade drawdown, entry-time slicing, per-side and per-session minimums, neighbour counts 6/5/4/3, exact DSR formula); trace lists all 8 lows; consecutive-bar rule (`data_gap`); m5 window boundaries, session truncation, replacement, one use, stateless derivation; m5 swing includes the M5 bars since the last M15 close; fill vs `ref`; invalidation only on completed H1 bars; exit precedence delegated to the simulator; signal priority; D3 wording; D6 (timeout start); sealing conditions; trial definition; D5 thresholds expanded (aggregate P&L, drawdown, session, neighbourhood rule, DSR, sealed untouched) | Review of 0.1.0 (owner's reviewer, 2026-10-10) and an independent read-only audit of the 0.2.0 text; still draft, no results seen |
+| 0.2.0 (approved) | 2026-10-10 | Approval recorded; D6 = (b); timeout wording "signal-to-exit"; status, header and section 0. **No rule changed.** | Owner approval of `b9baf4c` |
