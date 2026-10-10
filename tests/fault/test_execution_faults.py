@@ -216,11 +216,24 @@ def test_restart_with_open_position_keeps_its_timeout(
     assert engine.signal_for(pos.idempotency_key) is not None
     r.step("08:15")
     assert len(r.sim.positions()) == 1
-    # Signal-to-exit (D6 b): the deadline is Signal.time + 30 min = 08:30. Down past it, the
-    # first step after it closes the position; the clock never restarts.
+    # Signal-to-exit (D6 b): the deadline is Signal.time + 30 min = 08:30. Stepped sparsely past
+    # it, the first step after it closes the position.
     r.step("08:45")
     assert r.sim.positions() == []
     assert engine.exit_reasons == {pos.position_id: ExitReason.TIMEOUT}
+
+    # Literally restarted after the deadline: the new process's first step closes it; the
+    # clock never restarts from the restart or from the fill.
+    late_path = tmp_path / "late" / "intents.sqlite"
+    plan = {at("08:00"): buy(max_hold=timedelta(minutes=30))}
+    late = rig(app_config, plan, store=IntentStore(late_path))
+    late.step("08:00")
+    (held,) = late.sim.positions()
+    late.store.close()
+    restarted = late.restart(IntentStore(late_path))
+    late.step("08:45")  # the restarted engine's first step
+    assert late.sim.positions() == []
+    assert restarted.exit_reasons == {held.position_id: ExitReason.TIMEOUT}
 
 
 def test_restart_without_the_store_adopts_and_still_force_flats(app_config: AppConfig) -> None:
