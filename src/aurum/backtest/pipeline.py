@@ -4,7 +4,8 @@
 the validated request (period, strategy, params, grid point), the sealed-period access (a
 refusal raises here; only the journalled opening and parity paths write to the ledger), every
 input file (warm-up included) and the frozen **evaluation context**: code, spec, config,
-effective costs and risk, symbol snapshot, input-data hash, declared grid and dates. A request
+effective costs and risk, the pinned symbol snapshot (``backtest.symbol_snapshot``, refused if
+missing or changed), input-data hash, declared grid and dates. A request
 that is invalid, refused or that the data store cannot serve is not an attempt.
 
 ``execute`` then records the attempt with that context (a grid batch or a retry under another
@@ -34,7 +35,7 @@ from typing import Any, Literal
 import aurum
 from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
 from aurum.adapters.storage.parquet import sha256_file
-from aurum.adapters.storage.specs import SpecSnapshot, latest_spec
+from aurum.adapters.storage.specs import SpecSnapshot, pinned_spec
 from aurum.backtest.accounting import equity_frame, journal_frame, summarize, trades_frame
 from aurum.backtest.broker import SimBroker, SimCosts
 from aurum.backtest.loading import MarketPlan, plan_market, read_market
@@ -175,9 +176,10 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
         raise ConfigError("commission currency differs from the account currency")
     if (request.grid_id or request.retry_of) and (request.open_sealed or request.parity):
         raise ConfigError("grid points and retries are ordinary evaluations, never sealed/parity")
-    snapshot = latest_spec(settings.data_dir)
-    spec, symbol = snapshot.spec, snapshot.spec.name
     bt = cfg.backtest
+    pin = bt.symbol_snapshot
+    snapshot = pinned_spec(settings.data_dir, pin.file, pin.sha256)
+    spec, symbol = snapshot.spec, snapshot.spec.name
     latency = bt.latency_ms if request.latency_ms is None else request.latency_ms
     slippage = (
         cfg.broker.slippage.points_per_side
@@ -259,6 +261,7 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
         },
         "symbol": {
             "snapshot": snapshot.path.name,
+            "file_sha256": snapshot.sha256,
             "server": snapshot.server,
             "spec_sha256": _sha256_json(spec.model_dump(mode="json")),
         },

@@ -82,7 +82,8 @@ Its job is to tell the truth, not to make backtests look good.
   wakes at M5 closes, phase boundaries and `max_hold` deadlines; `SimBroker` fills on the first
   quote at or after `now + latency`. Bar-only days use the worst-case intra-bar rule and flag the
   trade (`intrabar_rule`, `worst_case`). Every evaluation is a ledger attempt first, carrying
-  its frozen context (code, spec, config, costs/risk, symbol snapshot, input data with warm-up,
+  its frozen context (code, spec, config, costs/risk, the pinned symbol snapshot
+  `backtest.symbol_snapshot` (file + sha256, never "the latest"), input data with warm-up,
   grid, dates); a grid batch or retry under another context is refused. Failures keep their
   stage; retries are linked, never new grid points. A success stages its files, records trial +
   outcome in one transaction (one trial per batch point), then publishes `reports/runs/<id>/`

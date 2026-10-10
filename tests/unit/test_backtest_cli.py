@@ -1,5 +1,6 @@
 """`aurum backtest run/grid/recover/report/compare` end to end on a synthetic data store."""
 
+import hashlib
 import json
 import os
 import shutil
@@ -12,7 +13,6 @@ from typing import Any
 
 import polars as pl
 import pytest
-import yaml
 from typer.testing import CliRunner
 
 from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
@@ -27,24 +27,10 @@ from aurum.core.timeframes import Timeframe
 from aurum.ledger.trial_ledger import TrialLedger
 from aurum.settings import load_settings
 from aurum.strategies import trend_pullback
-from tests.sim_store import write_store
+from tests.sim_store import SNAPSHOT, snapshot_bytes, use_configs, write_store
 
 runner = CliRunner()
 TICK_DAY, BAR_DAY = date(2026, 9, 15), date(2026, 9, 14)  # Tuesday (exact ticks), Monday (bars)
-
-
-def use_configs(
-    tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch, sealed: dict[str, object]
-) -> None:
-    """The repo configs with another sealed period (tests of pipeline mechanics keep the seal
-    out of their synthetic days; the real seal is tested in test_parity.py)."""
-    configs = tmp_path / "configs"
-    shutil.copytree(repo_root / "configs", configs)
-    backtest = configs / "backtest.yaml"
-    cfg = yaml.safe_load(backtest.read_text(encoding="utf-8"))
-    cfg["sealed_period"] = sealed
-    backtest.write_text(yaml.safe_dump(cfg), encoding="utf-8")
-    monkeypatch.setenv("AURUM_CONFIG_DIR", str(configs))
 
 
 @pytest.fixture
@@ -409,11 +395,23 @@ def test_a_grid_batch_is_frozen_to_its_evaluation_context(
         path.write_text(text.replace(old, new), encoding="utf-8")
         return lambda: path.write_text(text, encoding="utf-8")
 
-    def resnapshot() -> Callable[[], None]:  # the same contract, captured again
-        snaps = data / "specs" / "XAUUSD"
-        again = snaps / "20260102T000000Z.json"
-        shutil.copy(snaps / "20260101T000000Z.json", again)
-        return again.unlink
+    snaps = data / "specs" / "XAUUSD"
+    pinned, newer = snaps / SNAPSHOT, snaps / "20260102T000000Z.json"
+    level = b'"stops_level_points": '
+    other_contract = snapshot_bytes().replace(level + b"0", level + b"5")
+    assert other_contract != snapshot_bytes()
+
+    def repin() -> Callable[[], None]:  # pin the collector's newer snapshot instead
+        newer.write_bytes(other_contract)
+        old = f"file: {SNAPSHOT}\n  sha256: {hashlib.sha256(snapshot_bytes()).hexdigest()}"
+        new = f"file: {newer.name}\n  sha256: {hashlib.sha256(other_contract).hexdigest()}"
+        restore = edit("backtest.yaml", old, new)
+
+        def undo() -> None:
+            restore()
+            newer.unlink()
+
+        return undo
 
     def add_warmup_day() -> Callable[[], None]:
         copied = [DataLayout(data).canonical_bars("XAUUSD", tf, warmup_day) for tf in tfs]
@@ -443,7 +441,7 @@ def test_a_grid_batch_is_frozen_to_its_evaluation_context(
          lambda: edit("broker.yaml", "points_per_side: 5", "points_per_side: 6")),
         ("risk", "config_hash, risk",
          lambda: edit("risk.yaml", "risk_per_trade_pct: 0.25", "risk_per_trade_pct: 0.2")),
-        ("symbol snapshot", "symbol", resnapshot),
+        ("symbol snapshot pin", "config_hash, symbol", repin),
         ("input data (warm-up)", "data", add_warmup_day),
         ("declared grid", "grid", patch(trend_pullback, "declared_grid", lambda: other_grid)),
     ]  # fmt: skip
@@ -458,6 +456,12 @@ def test_a_grid_batch_is_frozen_to_its_evaluation_context(
             result.output
         ), (label, result.output)
         assert ledger_rows(data)["attempts"] == 27, label  # refused before any attempt
+    pinned.write_bytes(other_contract)  # the pinned file's bytes changed: refused, never used
+    tampered = runner.invoke(app, [*GRID, "--retry-failed"])
+    pinned.write_bytes(snapshot_bytes())
+    assert tampered.exit_code == 1
+    assert f"pinned symbol snapshot {SNAPSHOT} has sha256" in flat(tampered.output)
+    assert ledger_rows(data)["attempts"] == 27
     settings = load_settings()
     with pytest.raises(ConfigError, match="not this request's"):  # other dates, same batch
         pipeline.execute(
@@ -468,8 +472,10 @@ def test_a_grid_batch_is_frozen_to_its_evaluation_context(
             ),
             runs=RunLayout(runs), clock=SystemClock(),
         )  # fmt: skip
+    newer.write_bytes(other_contract)  # the collector's daily snapshot: ignored, not "latest"
     resumed = runner.invoke(app, [*GRID, "--retry-failed"])  # the frozen context again
     assert resumed.exit_code == 0, resumed.output
+    assert frozen_context(data)["symbol"]["snapshot"] == SNAPSHOT
     assert ledger_rows(data) == {
         "trials": 27, "attempts": 28, "attempt_outcomes": 28, "sealed_openings": 0,
         "parity_accesses": 0, "grid_batches": 1,

@@ -1,12 +1,17 @@
 """A small synthetic Phase 2 data store (canonical bars, normalized ticks, day manifest, spec
-snapshot) for end-to-end backtest tests. Deterministic for a given seed."""
+snapshot) for end-to-end backtest tests, and repo configs pinned to its snapshot.
+Deterministic for a given seed."""
 
+import hashlib
 import json
+import shutil
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import numpy as np
 import polars as pl
+import pytest
+import yaml
 
 from aurum.adapters.storage.layout import DataLayout
 from aurum.adapters.storage.parquet import write_parquet
@@ -16,6 +21,7 @@ from aurum.data.schemas import CANONICAL_BARS, DAY_SOURCES, NORMALIZED_TICKS, po
 from tests.simdata import spec
 
 SYMBOL = "XAUUSD"
+SNAPSHOT = "20260101T000000Z.json"
 TICK_SECONDS = 2
 MARKET_HOURS_UTC = (0, 21)  # every test day is a summer weekday: open 00:00-20:59 UTC
 
@@ -94,16 +100,40 @@ def write_store(
         DAY_SOURCES,
         overwrite=True,
     )
-    snap = root / "specs" / SYMBOL / "20260101T000000Z.json"
+    snap = root / "specs" / SYMBOL / SNAPSHOT
     snap.parent.mkdir(parents=True, exist_ok=True)
-    snap.write_text(
-        json.dumps(
-            {
-                "captured_at": "2026-01-01T00:00:00+00:00",
-                "server": "Test-Demo",
-                "spec": spec().model_dump(mode="json"),
-            }
-        ),
-        encoding="utf-8",
-    )
+    snap.write_bytes(snapshot_bytes())
     return layout
+
+
+def snapshot_bytes() -> bytes:
+    body = {
+        "captured_at": "2026-01-01T00:00:00+00:00",
+        "server": "Test-Demo",
+        "spec": spec().model_dump(mode="json"),
+    }
+    return json.dumps(body).encode()
+
+
+def use_configs(
+    dest: Path,
+    repo_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    sealed: dict[str, object] | None = None,
+) -> Path:
+    """The repo configs under ``dest``, pinned to the synthetic store's snapshot, optionally
+    with another sealed period (tests of pipeline mechanics keep the seal out of their
+    synthetic days). Returns the config dir."""
+    configs = dest / "configs"
+    shutil.copytree(repo_root / "configs", configs)
+    backtest = configs / "backtest.yaml"
+    cfg = yaml.safe_load(backtest.read_text(encoding="utf-8"))
+    cfg["symbol_snapshot"] = {
+        "file": SNAPSHOT,
+        "sha256": hashlib.sha256(snapshot_bytes()).hexdigest(),
+    }
+    if sealed is not None:
+        cfg["sealed_period"] = sealed
+    backtest.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setenv("AURUM_CONFIG_DIR", str(configs))
+    return configs

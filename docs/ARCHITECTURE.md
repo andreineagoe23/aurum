@@ -29,7 +29,7 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `ports` | Protocols: `BrokerPort`, `ClockPort`, `DataStorePort`, `MarketDataSource` (what ingestion needs from a broker) |
 | `adapters.mt5` | The only `MetaTrader5` user, lazily: `broker.MT5Broker` (guarded writes, idempotent send, UTC reads), `servertime` (server clock ↔ UTC, ADR-0004), `frames` (raw arrays → polars), `snapshot` (symbol specs), `tester` (Strategy Tester deals CSV), `loader` |
 | `adapters.fake` | `FakeBroker`: in-memory deterministic broker for unit tests |
-| `adapters.storage` | `layout.DataLayout`/`RunLayout` (every path), `parquet` (atomic, deterministic writes), `live_ticks` (collector chunks, journal, heartbeat), `specs` |
+| `adapters.storage` | `layout.DataLayout`/`RunLayout` (every path), `parquet` (atomic, deterministic writes), `live_ticks` (collector chunks, journal, heartbeat), `specs` (`pinned_spec`: the one snapshot backtests use, by name and sha256) |
 | `data` | Phase 2 pipeline: `backfill`, `normalize`, `resample` (ticks → M1 → M5/M15/H1), `pipeline` (canonical bars, tick fidelity ADR-0007), `compare`, `qa`, `market_hours`, `spreads`, `hashes`, `depth`, `schemas` (all column definitions), `reports`, `summary` |
 | `sessions` | `clock.SessionClock` (London wall clock → UTC phases, ADR-0002), `calendar.TradingCalendar` (phases + market closures and early closes), `state_machine` (emits on first update → restart flattens), `news` (blackout windows) |
 | `features` | `view` (`BarStore`/`MarketView`: completed bars only), `asof` (joins on close time), `indicators` (ATR, windowed EMA) |

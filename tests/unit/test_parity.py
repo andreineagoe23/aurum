@@ -16,7 +16,7 @@ from aurum.backtest.storage import read_trades
 from aurum.cli import app
 from aurum.core.enums import ExitReason, Side
 from aurum.ledger.trial_ledger import TrialLedger
-from tests.sim_store import write_store
+from tests.sim_store import use_configs, write_store
 
 TZ = ServerTimeZone("America/New_York", 7)
 runner = CliRunner()
@@ -216,8 +216,9 @@ def test_reader_rejects_open_positions_and_bad_headers(tmp_path: Path) -> None:
 
 
 @pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, repo_root: Path) -> tuple[Path, Path]:
     data, runs = tmp_path / "data", tmp_path / "runs"
+    use_configs(tmp_path, repo_root, monkeypatch)  # the real seal, the store's snapshot
     write_store(data, tick_days=[date(2026, 9, 15)], bar_days=[date(2026, 9, 14)])
     monkeypatch.setenv("AURUM_DATA_DIR", str(data))
     monkeypatch.setenv("AURUM_RUNS_DIR", str(runs))

@@ -24,6 +24,9 @@ Rules from MASTER_PROMPT Phases 5-6 and section 4 rules 9-11. Implementation det
     hash, the config hash with the effective costs, risk and account values, the symbol
     snapshot (name and content), the input data (hash over every planned file, warm-up
     included), the declared grid and the dates.
+  - The symbol snapshot is **pinned** in `backtest.yaml` `symbol_snapshot` (file name + sha256
+    of its bytes), never "the latest". A missing pinned file or other bytes are refused. A
+    newer snapshot (the collector writes one at least daily) is ignored.
   - A grid batch is frozen to the context of its first run (`grid_batches`). Any later run or
     retry under another context is refused before any attempt, naming the changed parts.
   - A retry names the failed or unfinished attempt it repeats (same grid point and context,

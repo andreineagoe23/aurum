@@ -19,6 +19,15 @@ fixed_volume_lots: 0.10
 
 warmup_days: 10              # calendar days of bars loaded before --from
 
+# The broker symbol-spec snapshot every backtest uses (reviewer decision 2026-10-10), by file
+# name under <data>/specs/<symbol>/ and the sha256 of its bytes. Never "the latest": the
+# collector writes a new snapshot at least once per UTC day, which must not change a running
+# grid batch. A missing file or other bytes are refused. 20261010T000046Z.json is the USD
+# account's contract cited in docs/strategies/trend_pullback.md section 8a.
+symbol_snapshot:
+  file: 20261010T000046Z.json
+  sha256: 0426cf8caefd2faa93b5b3b24004db656e2768e139122d2cd34e394b0be0c7ee
+
 # Sealed final-test period (owner decision D1, 2026-10-10; docs/VALIDATION_PROTOCOL.md).
 # No backtest reads data dated inside it: the loader refuses those files before reading
 # (warm-up and the extra end day included). Two journalled ways in, nothing else:

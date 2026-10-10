@@ -416,6 +416,17 @@ class SealedPeriodConfig(_Config):
         return first <= self.last and last >= self.first
 
 
+class SnapshotPinConfig(_Config):
+    """The one broker symbol-spec snapshot every backtest uses, by file name and content hash
+    (reviewer decision 2026-10-10): never "the latest", so a snapshot the collector writes later
+    cannot change an evaluation or a running grid batch."""
+
+    file: str = Field(pattern=r"^\d{8}T\d{6}Z\.json$")
+    """A file name under ``<data>/specs/<symbol>/``."""
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    """Of the file's bytes."""
+
+
 class BacktestConfig(_Config):
     """Simulator settings (Phase 3). Costs (commission, slippage) come from broker.yaml."""
 
@@ -435,6 +446,7 @@ class BacktestConfig(_Config):
     warmup_days: int = Field(ge=0, le=60)
     """Calendar days of bars loaded before ``--from`` so strategies have history."""
     sealed_period: SealedPeriodConfig
+    symbol_snapshot: SnapshotPinConfig
 
 
 # ------------------------------------------------------------------------------ strategies/
