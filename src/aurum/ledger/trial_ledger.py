@@ -76,7 +76,61 @@ CREATE TRIGGER IF NOT EXISTS parity_no_update BEFORE UPDATE ON parity_accesses
 BEGIN SELECT RAISE(ABORT, 'parity accesses are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS parity_no_delete BEFORE DELETE ON parity_accesses
 BEGIN SELECT RAISE(ABORT, 'parity accesses are append-only'); END;
+CREATE TABLE IF NOT EXISTS attempts (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id   TEXT NOT NULL UNIQUE,
+    started_at   TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    variant      TEXT NOT NULL,
+    params_json  TEXT NOT NULL,
+    first_day    TEXT NOT NULL,
+    last_day     TEXT NOT NULL,
+    purpose      TEXT NOT NULL,
+    grid_id      TEXT,
+    retry_of     TEXT UNIQUE,
+    code_version TEXT,
+    config_hash  TEXT
+);
+CREATE TABLE IF NOT EXISTS attempt_outcomes (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    attempt_id   TEXT NOT NULL UNIQUE,
+    finished_at  TEXT NOT NULL,
+    status       TEXT NOT NULL CHECK (status IN ('succeeded', 'failed')),
+    stage        TEXT,
+    error        TEXT,
+    trial_id     TEXT
+);
+CREATE TRIGGER IF NOT EXISTS attempts_no_update BEFORE UPDATE ON attempts
+BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS attempts_no_delete BEFORE DELETE ON attempts
+BEGIN SELECT RAISE(ABORT, 'attempts are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS outcomes_no_update BEFORE UPDATE ON attempt_outcomes
+BEGIN SELECT RAISE(ABORT, 'attempt outcomes are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS outcomes_no_delete BEFORE DELETE ON attempt_outcomes
+BEGIN SELECT RAISE(ABORT, 'attempt outcomes are append-only'); END;
 """
+
+
+@dataclass(frozen=True)
+class Attempt:
+    """One evaluation attempt: recorded before it runs, with its outcome once it ends.
+    ``status`` is ``succeeded``, ``failed`` or ``unfinished`` (no outcome: it crashed or is
+    still running)."""
+
+    attempt_id: str
+    started_at: datetime
+    strategy: str
+    variant: str
+    params: dict[str, Any]
+    first_day: date
+    last_day: date
+    purpose: str
+    grid_id: str | None
+    retry_of: str | None
+    status: str
+    stage: str | None
+    error: str | None
+    trial_id: str | None
 
 
 @dataclass(frozen=True)
@@ -296,6 +350,171 @@ class TrialLedger:
             )
             for r in cur.fetchall()
         ]
+
+    def start_attempt(
+        self,
+        *,
+        strategy: str,
+        variant: str,
+        params: Mapping[str, Any],
+        first_day: date,
+        last_day: date,
+        purpose: str,
+        grid_id: str | None = None,
+        retry_of: str | None = None,
+        code_version: str | None = None,
+        config_hash: str | None = None,
+    ) -> str:
+        """Record an evaluation attempt before it runs; returns its id. A retry names the
+        failed or unfinished attempt it repeats: same grid point, at most one retry each."""
+        params_json = _canonical_json(dict(params))
+        if retry_of is not None:
+            self.check_retry(
+                retry_of,
+                strategy=strategy,
+                variant=variant,
+                params=params,
+                first_day=first_day,
+                last_day=last_day,
+                purpose=purpose,
+                grid_id=grid_id,
+            )
+        started = to_utc(self._clock.now())
+        attempt_id = f"at_{started:%Y%m%dT%H%M%S%f}_{secrets.token_hex(4)}"
+        try:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO attempts (attempt_id, started_at, strategy, variant, params_json,"
+                    " first_day, last_day, purpose, grid_id, retry_of, code_version, config_hash)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        attempt_id,
+                        started.isoformat(),
+                        strategy,
+                        variant,
+                        params_json,
+                        first_day.isoformat(),
+                        last_day.isoformat(),
+                        purpose,
+                        grid_id,
+                        retry_of,
+                        code_version,
+                        config_hash,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerError(f"attempt {retry_of} was already retried") from exc
+        return attempt_id
+
+    def check_retry(
+        self,
+        retry_of: str,
+        *,
+        strategy: str,
+        variant: str,
+        params: Mapping[str, Any],
+        first_day: date,
+        last_day: date,
+        purpose: str,
+        grid_id: str | None,
+    ) -> None:
+        """Raise unless ``retry_of`` is a failed or unfinished attempt of exactly this grid point
+        that has not been retried yet. Read-only: callers check before any side effect."""
+        prior = self.get_attempt(retry_of)
+        if prior.status == "succeeded":
+            raise LedgerError(f"attempt {retry_of} succeeded; there is nothing to retry")
+        same = (
+            prior.strategy,
+            prior.variant,
+            _canonical_json(prior.params),
+            prior.first_day,
+            prior.last_day,
+            prior.purpose,
+            prior.grid_id,
+        ) == (
+            strategy,
+            variant,
+            _canonical_json(dict(params)),
+            first_day,
+            last_day,
+            purpose,
+            grid_id,
+        )
+        if not same:
+            raise LedgerError(f"a retry must repeat attempt {retry_of}'s exact grid point")
+        taken = self._conn.execute(
+            "SELECT attempt_id FROM attempts WHERE retry_of = ?", (retry_of,)
+        ).fetchone()
+        if taken is not None:
+            raise LedgerError(f"attempt {retry_of} was already retried by {taken[0]}")
+
+    def finish_attempt(
+        self,
+        attempt_id: str,
+        *,
+        succeeded: bool,
+        stage: str | None = None,
+        error: str | None = None,
+        trial_id: str | None = None,
+    ) -> None:
+        """The attempt's one terminal outcome (success with its trial, or the failing stage
+        and error)."""
+        try:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO attempt_outcomes (attempt_id, finished_at, status, stage, error,"
+                    " trial_id) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        attempt_id,
+                        to_utc(self._clock.now()).isoformat(),
+                        "succeeded" if succeeded else "failed",
+                        stage,
+                        error,
+                        trial_id,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerError(f"attempt {attempt_id} already has an outcome") from exc
+
+    _ATTEMPT_SQL = (
+        "SELECT a.attempt_id, a.started_at, a.strategy, a.variant, a.params_json, a.first_day,"
+        " a.last_day, a.purpose, a.grid_id, a.retry_of, o.status, o.stage, o.error, o.trial_id"
+        " FROM attempts a LEFT JOIN attempt_outcomes o ON o.attempt_id = a.attempt_id"
+    )
+
+    @staticmethod
+    def _attempt(r: tuple[Any, ...]) -> Attempt:
+        return Attempt(
+            attempt_id=r[0],
+            started_at=datetime.fromisoformat(r[1]),
+            strategy=r[2],
+            variant=r[3],
+            params=json.loads(r[4]),
+            first_day=date.fromisoformat(r[5]),
+            last_day=date.fromisoformat(r[6]),
+            purpose=r[7],
+            grid_id=r[8],
+            retry_of=r[9],
+            status=r[10] or "unfinished",
+            stage=r[11],
+            error=r[12],
+            trial_id=r[13],
+        )
+
+    def get_attempt(self, attempt_id: str) -> Attempt:
+        row = self._conn.execute(
+            self._ATTEMPT_SQL + " WHERE a.attempt_id = ?", (attempt_id,)
+        ).fetchone()
+        if row is None:
+            raise LedgerError(f"unknown attempt {attempt_id}")
+        return self._attempt(row)
+
+    def attempts(self, *, grid_id: str | None = None) -> list[Attempt]:
+        """Every attempt (or a grid's), oldest first, failures and unfinished ones included."""
+        sql, args = self._ATTEMPT_SQL, tuple[str, ...]()
+        if grid_id is not None:
+            sql, args = sql + " WHERE a.grid_id = ?", (grid_id,)
+        return [self._attempt(r) for r in self._conn.execute(sql + " ORDER BY a.seq", args)]
 
     def record_parity_access(
         self,

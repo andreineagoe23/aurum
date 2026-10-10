@@ -36,8 +36,8 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `strategies` | `base` contract (Signals only; `warmup_bars`, `diagnostics`), `reference.FixedTimeReference` (parity/null strategy), `trend_pullback.TrendPullback` (Phase 5 family 1, spec 0.2.0; fixed rules as constants, only the declared grid as params), `registry` (config → strategy) |
 | `risk` | `base` (`RiskEngine`, `RiskContext`), `policy.PolicyRiskEngine` (sizing + every gate, ADR-0010), `fixed.FixedVolumeRisk` (tester parity only) |
 | `execution` | `engine.Engine` (the per-step decision loop for every mode), `orders.OrderManager` (only send path), `intents` (SQLite intent store), `reconcile`, `killswitch` (ADR-0011) |
-| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (config → run → ledger), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` (refuses sealed-period files before reading), `sealed` (sealed final-test guard and its one-time journalled opening) |
-| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed rows; `sealed_openings` journal (once per strategy and variant) |
+| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (config → attempt → run → trial; failures kept with their stage), `grid` (a strategy's declared search grid as one auditable batch; skip done, explicit linked retries), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` (refuses sealed-period files before reading), `sealed` (sealed final-test guard and its one-time journalled opening) |
+| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed trial rows; `attempts` + `attempt_outcomes` (every evaluation, failed or unfinished included, retries linked); `sealed_openings` (once per strategy and variant) and `parity_accesses` journals |
 | `monitoring` | `logging` (structlog JSON, secret redaction), `doctor`, `watchdog` (heartbeat → kill switch) |
 | `apps` | `collector` (live ticks, Windows); `shadow`, `trader` are Phase 7/8 placeholders |
 | `validation` | `phase3b` (Phase 3b trigger on a candidate's worst/best intra-bar runs, ADR-0009 §9); walk-forward and DSR are Phase 6 |
@@ -82,7 +82,7 @@ resent) → broker re-checks approval and runs `core.safety` on a fresh `account
 ## CLI
 
 `aurum doctor` · `mt5 ping|symbols|bars` · `data depth|backfill|collect|qa|resample|spreads|hashes`
-· `backtest run|report|compare|parity` · `ledger list` · `kill` / `unkill` / `watchdog` ·
+· `backtest run|grid|report|compare|parity` · `ledger list` · `kill` / `unkill` / `watchdog` ·
 placeholders (exit 2): `validate walkforward`, `shadow run`, `trade demo`.
 
 ## Tests (`tests/`)

@@ -1,8 +1,12 @@
 """One backtest from configuration to stored run and trial-ledger row (``aurum backtest run``).
 
-Every run is recorded in the trial ledger, whatever its result (MASTER_PROMPT §4 rule 9). The
-manifest ties the result to the code commit, the full config (hash), the exact input files
-(data hash) and every parameter, including command-line overrides.
+Invalid requests (including a bad retry) and sealed-period refusals raise before any attempt
+is recorded and before a sealed opening is spent. Every evaluation is then an **attempt** in
+the trial ledger, recorded before it runs. It ends as a trial (success) or as a failure with
+its stage and error (``EvaluationFailedError``), so no failed run disappears. An attempt
+with no outcome crashed. Retries name the attempt they repeat. The manifest ties the result
+to the code commit, the full config (hash), the exact input files (data hash) and every
+parameter, including command-line overrides.
 """
 
 import hashlib
@@ -21,7 +25,7 @@ from aurum.backtest.runner import run_backtest
 from aurum.backtest.sealed import resolve_access
 from aurum.backtest.storage import new_run_id, write_run
 from aurum.core.clock import ManualClock
-from aurum.core.errors import ConfigError
+from aurum.core.errors import ConfigError, EvaluationFailedError
 from aurum.data.market_hours import MarketHours
 from aurum.execution.engine import Engine
 from aurum.ledger.trial_ledger import TrialLedger, current_code_version
@@ -58,6 +62,12 @@ class RunRequest:
     parity: bool = False
     """The MT5 tester parity check of the designated reference strategy inside its approved
     window (backtest.yaml sealed_period.parity_exemption); journalled, never an opening."""
+    params: dict[str, Any] | None = None
+    """Strategy params replacing the config's (a declared grid point; validated by the strategy)."""
+    grid_id: str | None = None
+    """The declared-grid batch this attempt belongs to (aurum.backtest.grid)."""
+    retry_of: str | None = None
+    """The failed or unfinished attempt this one retries (same grid point)."""
 
 
 @dataclass(frozen=True)
@@ -65,8 +75,15 @@ class RunOutcome:
     run_id: str
     run_dir: Path
     trial_id: str
+    attempt_id: str
     summary: dict[str, Any]
     manifest: dict[str, Any]
+
+
+@dataclass
+class _Progress:
+    stage: str = "load"
+    trial_id: str | None = None
 
 
 def config_hash(config: AppConfig) -> str:
@@ -96,8 +113,11 @@ def execute(
     start = calendar.local_to_utc(request.first, datetime.min.time())
     # Built (validated) before the sealed check, so a config error cannot spend the one-time
     # opening; building reads no data.
+    strategy_cfg = cfg.strategies[request.strategy]
+    if request.params is not None:
+        strategy_cfg = strategy_cfg.model_copy(update={"params": dict(request.params)})
     strategy = build_strategy(
-        cfg.strategies[request.strategy],
+        strategy_cfg,
         variant=request.variant,
         symbol=symbol,
         point=spec.point,
@@ -106,6 +126,19 @@ def execute(
     )
     code_version = current_code_version(settings.project_root)
     cfg_hash = config_hash(cfg)
+    purpose = "parity" if request.parity else "evaluation"
+    if request.retry_of is not None:  # before any side effect (a sealed opening, an attempt)
+        with TrialLedger(ledger_path(settings.data_dir), clock=clock) as ledger:
+            ledger.check_retry(
+                request.retry_of,
+                strategy=request.strategy,
+                variant=request.variant,
+                params=strategy_cfg.params,
+                first_day=request.first,
+                last_day=request.last,
+                purpose=purpose,
+                grid_id=request.grid_id,
+            )
     access = resolve_access(
         cfg,
         request,
@@ -114,145 +147,190 @@ def execute(
         code_version=code_version,
         clock=clock,
     )
-    layout = DataLayout(settings.data_dir)
-    loaded = load_market(
-        layout,
-        symbol,
-        point=spec.point,
-        first=request.first,
-        last=request.last,
-        warmup_days=bt.warmup_days if access.warmup_days is None else access.warmup_days,
-        bar_spread_extra_points=bt.bar_spread_extra_points,
-        last_data_day=access.last_data_day,
-        forbidden=access.forbidden,
-        warmup_bars=strategy.warmup_bars,
-        warmup_before=start.date(),
-    )
-    sim_clock = ManualClock(start)
-    commission = cfg.broker.commission.per_lot_per_side
-    broker = SimBroker(
-        market=loaded.market,
-        spec=spec,
-        clock=sim_clock,
-        costs=SimCosts(
-            commission_per_lot_side=commission,
-            slippage_points=slippage,
-            latency=timedelta(milliseconds=latency),
-            max_quote_wait=timedelta(seconds=bt.max_quote_wait_seconds),
-        ),
-        balance=bt.initial_balance,
-        leverage=bt.leverage,
-        currency=cfg.broker.commission.currency,
-        market_hours=hours,
-    )
-    broker.connect()
-    risk_engine: RiskEngine = (
-        PolicyRiskEngine(
-            cfg.risk,
-            commission_per_lot_side=commission,
-            stop_slippage_points=slippage,
-            news=NewsBlackout(cfg.risk.news_blackout),
-        )
-        if request.risk == "policy"
-        else FixedVolumeRisk(bt.fixed_volume_lots, commission)
-    )
-    engine = Engine(
-        broker=broker,
-        strategy=strategy,
-        risk=risk_engine,
-        calendar=calendar,
-        symbol=symbol,
-        magic=cfg.broker.magic_number,
-        max_intent_age=timedelta(seconds=cfg.broker.max_intent_age_seconds),
-        atr_period=cfg.risk.atr_period,
-    )
-    result = run_backtest(
-        engine=engine,
-        broker=broker,
-        market=loaded.market,
-        calendar=calendar,
-        clock=sim_clock,
-        first=request.first,
-        last=request.last,
-    )
-    trades = trades_frame(result, spec, strategy.strategy_id)
-    equity = equity_frame(result.equity)
-    journal = journal_frame(result.journal)
-    summary: dict[str, Any] = {
-        **summarize(trades, equity, bt.initial_balance),
-        "open_at_end": result.open_at_end,
-        "tick_days": len(loaded.tick_days),
-        "bar_days": len(loaded.bar_days),
-        **strategy.diagnostics(),
-    }
-    params: dict[str, Any] = {
-        "purpose": "parity" if access.parity else "evaluation",
-        "strategy_params": cfg.strategies[request.strategy].params,
-        "variant": request.variant,
-        "symbol": symbol,
-        "latency_ms": latency,
-        "slippage_points": slippage,
-        "commission_per_lot_side": commission,
-        "bar_spread_extra_points": bt.bar_spread_extra_points,
-        "max_quote_wait_seconds": bt.max_quote_wait_seconds,
-        "risk_engine": (
-            "PolicyRiskEngine" if request.risk == "policy" else "FixedVolumeRisk (parity only)"
-        ),
-        "volume_lots": bt.fixed_volume_lots if request.risk == "fixed" else None,
-        "risk_per_trade_pct": cfg.risk.risk_per_trade_pct if request.risk == "policy" else None,
-        "initial_balance": bt.initial_balance,
-        "leverage": bt.leverage,
-        "market_close_buffer_minutes": cfg.sessions.market_close_buffer_minutes,
-    }
-    created = clock.now()
-    run_id = new_run_id(created, request.strategy, request.variant)
-    data_hash = loaded.data_hash(settings.data_dir)
-    manifest: dict[str, Any] = {
-        "created_at": created.isoformat(),
-        "strategy": request.strategy,
-        "variant": request.variant,
-        "first": request.first.isoformat(),
-        "last": request.last.isoformat(),
-        "code_version": code_version,
-        "config_hash": cfg_hash,
-        "data_hash": data_hash,
-        "data_files": len(loaded.files),
-        "tick_days": [d.isoformat() for d in loaded.tick_days],
-        "spec_snapshot": snapshot.path.name,
-        "spec": spec.model_dump(mode="json"),
-        "params": params,
-        "notes": request.notes,
-        "sealed_opened": access.opened,
-        "warmup_bars": {str(tf): n for tf, n in strategy.warmup_bars.items()},
-        "first_data_day": loaded.first_data_day.isoformat(),
-    }
-    with TrialLedger(ledger_path(settings.data_dir)) as ledger:
-        trial = ledger.record_trial(
+    with TrialLedger(ledger_path(settings.data_dir), clock=clock) as ledger:
+        attempt_id = ledger.start_attempt(
             strategy=request.strategy,
             variant=request.variant,
-            params={**params, "run_id": run_id, "data_hash": data_hash},
-            data_start=result.start,
-            data_end=result.end,
-            metrics={k: (float(v) if v is not None else None) for k, v in summary.items()},
-            notes=request.notes or f"backtest run {run_id}",
+            params=strategy_cfg.params,
+            first_day=request.first,
+            last_day=request.last,
+            purpose=purpose,
+            grid_id=request.grid_id,
+            retry_of=request.retry_of,
             code_version=code_version,
             config_hash=cfg_hash,
-            sealed_test_opened=access.opened,
         )
-    manifest["trial_id"] = trial.trial_id
-    manifest["outputs"] = write_run(
-        runs,
-        run_id,
-        trades=trades,
-        equity=equity,
-        journal=journal,
-        manifest=manifest,
-        summary=summary,
-    )
-    return RunOutcome(
-        run_id=run_id,
-        run_dir=runs.run_dir(run_id),
-        trial_id=trial.trial_id,
-        summary=summary,
-        manifest=manifest,
-    )
+    progress = _Progress()
+
+    def evaluate() -> RunOutcome:
+        progress.stage = "load"
+        layout = DataLayout(settings.data_dir)
+        loaded = load_market(
+            layout,
+            symbol,
+            point=spec.point,
+            first=request.first,
+            last=request.last,
+            warmup_days=bt.warmup_days if access.warmup_days is None else access.warmup_days,
+            bar_spread_extra_points=bt.bar_spread_extra_points,
+            last_data_day=access.last_data_day,
+            forbidden=access.forbidden,
+            warmup_bars=strategy.warmup_bars,
+            warmup_before=start.date(),
+        )
+        sim_clock = ManualClock(start)
+        commission = cfg.broker.commission.per_lot_per_side
+        broker = SimBroker(
+            market=loaded.market,
+            spec=spec,
+            clock=sim_clock,
+            costs=SimCosts(
+                commission_per_lot_side=commission,
+                slippage_points=slippage,
+                latency=timedelta(milliseconds=latency),
+                max_quote_wait=timedelta(seconds=bt.max_quote_wait_seconds),
+            ),
+            balance=bt.initial_balance,
+            leverage=bt.leverage,
+            currency=cfg.broker.commission.currency,
+            market_hours=hours,
+        )
+        broker.connect()
+        risk_engine: RiskEngine = (
+            PolicyRiskEngine(
+                cfg.risk,
+                commission_per_lot_side=commission,
+                stop_slippage_points=slippage,
+                news=NewsBlackout(cfg.risk.news_blackout),
+            )
+            if request.risk == "policy"
+            else FixedVolumeRisk(bt.fixed_volume_lots, commission)
+        )
+        engine = Engine(
+            broker=broker,
+            strategy=strategy,
+            risk=risk_engine,
+            calendar=calendar,
+            symbol=symbol,
+            magic=cfg.broker.magic_number,
+            max_intent_age=timedelta(seconds=cfg.broker.max_intent_age_seconds),
+            atr_period=cfg.risk.atr_period,
+        )
+        progress.stage = "simulate"
+        result = run_backtest(
+            engine=engine,
+            broker=broker,
+            market=loaded.market,
+            calendar=calendar,
+            clock=sim_clock,
+            first=request.first,
+            last=request.last,
+        )
+        progress.stage = "account"
+        trades = trades_frame(result, spec, strategy.strategy_id)
+        equity = equity_frame(result.equity)
+        journal = journal_frame(result.journal)
+        summary: dict[str, Any] = {
+            **summarize(trades, equity, bt.initial_balance),
+            "open_at_end": result.open_at_end,
+            "tick_days": len(loaded.tick_days),
+            "bar_days": len(loaded.bar_days),
+            **strategy.diagnostics(),
+        }
+        params: dict[str, Any] = {
+            "purpose": "parity" if access.parity else "evaluation",
+            "strategy_params": strategy_cfg.params,
+            "attempt_id": attempt_id,
+            "grid_id": request.grid_id,
+            "retry_of": request.retry_of,
+            "variant": request.variant,
+            "symbol": symbol,
+            "latency_ms": latency,
+            "slippage_points": slippage,
+            "commission_per_lot_side": commission,
+            "bar_spread_extra_points": bt.bar_spread_extra_points,
+            "max_quote_wait_seconds": bt.max_quote_wait_seconds,
+            "risk_engine": (
+                "PolicyRiskEngine" if request.risk == "policy" else "FixedVolumeRisk (parity only)"
+            ),
+            "volume_lots": bt.fixed_volume_lots if request.risk == "fixed" else None,
+            "risk_per_trade_pct": cfg.risk.risk_per_trade_pct if request.risk == "policy" else None,
+            "initial_balance": bt.initial_balance,
+            "leverage": bt.leverage,
+            "market_close_buffer_minutes": cfg.sessions.market_close_buffer_minutes,
+        }
+        created = clock.now()
+        run_id = new_run_id(created, request.strategy, request.variant)
+        progress.stage = "hash"
+        data_hash = loaded.data_hash(settings.data_dir)
+        manifest: dict[str, Any] = {
+            "created_at": created.isoformat(),
+            "strategy": request.strategy,
+            "variant": request.variant,
+            "first": request.first.isoformat(),
+            "last": request.last.isoformat(),
+            "code_version": code_version,
+            "config_hash": cfg_hash,
+            "data_hash": data_hash,
+            "data_files": len(loaded.files),
+            "tick_days": [d.isoformat() for d in loaded.tick_days],
+            "spec_snapshot": snapshot.path.name,
+            "spec": spec.model_dump(mode="json"),
+            "params": params,
+            "notes": request.notes,
+            "sealed_opened": access.opened,
+            "warmup_bars": {str(tf): n for tf, n in strategy.warmup_bars.items()},
+            "first_data_day": loaded.first_data_day.isoformat(),
+        }
+        progress.stage = "record"
+        with TrialLedger(ledger_path(settings.data_dir)) as ledger:
+            trial = ledger.record_trial(
+                strategy=request.strategy,
+                variant=request.variant,
+                params={**params, "run_id": run_id, "data_hash": data_hash},
+                data_start=result.start,
+                data_end=result.end,
+                metrics={k: (float(v) if v is not None else None) for k, v in summary.items()},
+                notes=request.notes or f"backtest run {run_id}",
+                code_version=code_version,
+                config_hash=cfg_hash,
+                sealed_test_opened=access.opened,
+            )
+        progress.trial_id = trial.trial_id
+        manifest["trial_id"] = trial.trial_id
+        progress.stage = "write"
+        manifest["outputs"] = write_run(
+            runs,
+            run_id,
+            trades=trades,
+            equity=equity,
+            journal=journal,
+            manifest=manifest,
+            summary=summary,
+        )
+        return RunOutcome(
+            run_id=run_id,
+            run_dir=runs.run_dir(run_id),
+            trial_id=trial.trial_id,
+            attempt_id=attempt_id,
+            summary=summary,
+            manifest=manifest,
+        )
+
+    try:
+        outcome = evaluate()
+    except BaseException as exc:
+        with TrialLedger(ledger_path(settings.data_dir), clock=clock) as ledger:
+            ledger.finish_attempt(
+                attempt_id,
+                succeeded=False,
+                stage=progress.stage,
+                error=f"{type(exc).__name__}: {exc}",
+                trial_id=progress.trial_id,
+            )
+        if isinstance(exc, Exception):
+            raise EvaluationFailedError(attempt_id, progress.stage, exc) from exc
+        raise
+    with TrialLedger(ledger_path(settings.data_dir), clock=clock) as ledger:
+        ledger.finish_attempt(attempt_id, succeeded=True, trial_id=outcome.trial_id)
+    return outcome

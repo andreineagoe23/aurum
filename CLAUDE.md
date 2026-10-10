@@ -81,7 +81,8 @@ Its job is to tell the truth, not to make backtests look good.
 - Backtests (Phase 3): strategies see only a `MarketView` of bars closed by `now`; the runner
   wakes at M5 closes, phase boundaries and `max_hold` deadlines; `SimBroker` fills on the first
   quote at or after `now + latency`. Bar-only days use the worst-case intra-bar rule and flag the
-  trade (`intrabar_rule`, `worst_case`). Every `aurum backtest run` records a trial and writes
+  trade (`intrabar_rule`, `worst_case`). Every evaluation is a ledger attempt first (failures
+  keep their stage; retries are linked, never new grid points); a success records a trial and writes
   `reports/runs/<id>/` (git-ignored) with output hashes; reruns must be byte-identical
   (`aurum backtest compare`). Warm-up is loaded by the strategy's `warmup_bars` count, not
   calendar days.

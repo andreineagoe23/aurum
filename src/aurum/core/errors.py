@@ -48,3 +48,12 @@ class LedgerError(AurumError):
 class SealedPeriodError(AurumError):
     """A research backtest would read the sealed final-test period without its one-time,
     journalled opening (docs/VALIDATION_PROTOCOL.md)."""
+
+
+class EvaluationFailedError(AurumError):
+    """A backtest attempt failed after it was recorded; the ledger keeps its stage and error."""
+
+    def __init__(self, attempt_id: str, stage: str, cause: BaseException) -> None:
+        super().__init__(f"attempt {attempt_id} failed at {stage}: {type(cause).__name__}: {cause}")
+        self.attempt_id = attempt_id
+        self.stage = stage

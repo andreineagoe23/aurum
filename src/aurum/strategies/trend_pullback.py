@@ -37,6 +37,7 @@ read at T is missing; ``_read_set_incomplete``). The counts are diagnostics only
 reads them, and a gap never adds or removes a signal beyond what the rules already do.
 """
 
+import itertools
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -63,6 +64,7 @@ M5_TRIGGER_BARS = 6
 MIN_STOP_POINTS, STOP_CAP_POINTS = 500, 2000
 STOP_ATR_MULTS = (0.25, 0.5, 1.0)
 TARGET_RS = (1.0, 1.5, 2.0)
+H1_EMAS = (30, 50, 80)
 
 M5_MS, M15_MS = 5 * 60_000, 15 * 60_000
 TRIGGER_WINDOW_MS = M5_TRIGGER_BARS * M5_MS
@@ -73,7 +75,7 @@ class TrendPullbackParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    h1_ema: Literal[30, 50, 80] = 50
+    h1_ema: Literal[30, 50, 80] = 50  # = H1_EMAS
     stop_atr_mult: float = 0.5
     target_r: float = 1.5
 
@@ -414,3 +416,12 @@ def _missing(bars: BarSeries, first_ms: int, last_ms: int, step_ms: int) -> bool
         np.searchsorted(bars.close_time, lo, side="left")
     )
     return present < expected
+
+
+def declared_grid() -> list[dict[str, float]]:
+    """The pre-registered search grid (spec section 14), in a fixed order: 27 points per
+    variant, 54 trials in all."""
+    return [
+        {"h1_ema": h, "stop_atr_mult": m, "target_r": r}
+        for h, m, r in itertools.product(H1_EMAS, STOP_ATR_MULTS, TARGET_RS)
+    ]

@@ -2,9 +2,11 @@
 
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from aurum.core.timeframes import Timeframe
 from aurum.settings import StrategyConfig
+from aurum.strategies import trend_pullback
 from aurum.strategies.base import Strategy
 from aurum.strategies.reference import FixedTimeReference, ReferenceParams
 from aurum.strategies.trend_pullback import TrendPullback, TrendPullbackParams
@@ -51,3 +53,10 @@ def build_strategy(
     raise ValueError(
         f"strategy family {cfg.family!r} is not implemented until its spec is approved"
     )
+
+
+def declared_grid(cfg: StrategyConfig) -> list[dict[str, Any]]:
+    """The strategy's pre-registered search grid (from its approved spec), in a fixed order."""
+    if cfg.family == "trend_pullback":
+        return list(trend_pullback.declared_grid())
+    raise ValueError(f"strategy {cfg.name} declares no search grid")

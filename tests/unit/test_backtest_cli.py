@@ -4,6 +4,7 @@ import json
 import shutil
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import polars as pl
 import pytest
@@ -11,10 +12,12 @@ import yaml
 from typer.testing import CliRunner
 
 from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
+from aurum.backtest import pipeline
 from aurum.backtest.loading import load_market
+from aurum.backtest.runner import BacktestResult, EquityPoint
 from aurum.backtest.storage import new_run_id, read_manifest, read_trades
 from aurum.cli import app
-from aurum.core.errors import SealedPeriodError
+from aurum.core.errors import LedgerError, SealedPeriodError
 from aurum.core.timeframes import Timeframe
 from aurum.ledger.trial_ledger import TrialLedger
 from tests.sim_store import write_store
@@ -244,3 +247,103 @@ def test_run_ids_sort_by_creation_within_one_second() -> None:
     t = datetime(2026, 10, 9, 22, 29, 44, 900_000, tzinfo=UTC)
     ids = [new_run_id(t + timedelta(microseconds=n * 30_000), "s", "m5") for n in range(3)]
     assert sorted(ids) == ids
+
+
+def test_a_failed_evaluation_stays_auditable(
+    env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data, _ = env
+    dates = ["--from", "2026-09-14", "--to", "2026-09-15"]
+    refused = runner.invoke(app, ["backtest", "run", "nope", *dates])
+    assert refused.exit_code == 1  # an invalid request is not an attempt
+
+    def boom(**_: object) -> None:
+        raise RuntimeError("injected")
+
+    monkeypatch.setattr(pipeline, "run_backtest", boom)
+    args = ["backtest", "run", "reference_fixed_time", "--from", "2026-09-14", "--to", "2026-09-15"]
+    failed = runner.invoke(app, args)
+    assert failed.exit_code == 1
+    assert "failed at simulate: RuntimeError: injected" in flat(failed.output)
+    with TrialLedger(ledger_path(data)) as ledger:
+        (attempt,) = ledger.attempts()
+        assert ledger.list_trials() == []
+    assert (attempt.status, attempt.stage, attempt.error, attempt.trial_id) == (
+        "failed",
+        "simulate",
+        "RuntimeError: injected",
+        None,
+    )
+
+
+def test_grid_runs_the_declared_points_and_keeps_every_outcome(
+    env: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data, _ = env
+    # Fast stand-ins for loading (no 504-bar warm-up on two synthetic days) and simulation;
+    # validation, attempts, accounting, trials and run files are the real pipeline.
+    real_load = pipeline.load_market
+    monkeypatch.setattr(
+        pipeline, "load_market", lambda *a, **k: real_load(*a, **{**k, "warmup_bars": None})
+    )
+    seen: list[object] = []
+
+    def fake_run(*, engine: Any, clock: Any, **_: object) -> BacktestResult:
+        p = engine._strategy._p
+        seen.append(p)
+        if (p.h1_ema, p.stop_atr_mult, p.target_r) == (80, 1.0, 2.0) and seen.count(p) == 1:
+            raise RuntimeError("injected")  # only the first attempt of the last point fails
+        start = clock.now()
+        return BacktestResult(
+            start=start, end=start + timedelta(days=1), trades=[], journal=[], exit_reasons={},
+            signals={}, equity=[EquityPoint(start, 10_000.0, 10_000.0, 0)], open_at_end=0,
+        )  # fmt: skip
+
+    monkeypatch.setattr(pipeline, "run_backtest", fake_run)
+    sealed = ["backtest", "grid", "trend_pullback", "--from", "2030-01-07", "--to", "2030-01-08"]
+    refused = runner.invoke(app, sealed)  # the whole batch: before any attempt
+    assert refused.exit_code == 1
+    assert "overlaps the sealed final-test period" in flat(refused.output)
+    grid = ["backtest", "grid", "trend_pullback", "--from", "2026-09-14", "--to", "2026-09-15"]
+    for extra, code, tally, attempts in (
+        ([], 1, "26 resolved, 1 unresolved", 27),  # the failure is reported, the batch goes on
+        ([], 1, "26 resolved, 1 unresolved", 27),  # done points are not rerun; no silent retry
+        (["--retry-failed"], 0, "27 resolved, 0 unresolved", 28),  # one explicit, linked retry
+        (["--retry-failed"], 0, "27 resolved, 0 unresolved", 28),  # nothing left to run
+    ):
+        result = runner.invoke(app, [*grid, *extra])
+        assert result.exit_code == code, result.output
+        assert tally in flat(result.output)
+        with TrialLedger(ledger_path(data)) as ledger:
+            assert len(ledger.attempts()) == attempts
+    with TrialLedger(ledger_path(data)) as ledger:
+        history = ledger.attempts(grid_id="trend_pullback/m15/2026-09-14..2026-09-15")
+        assert len(ledger.list_trials()) == 27  # one per declared point; the retry is not a 28th
+        (failed,) = [a for a in history if a.status == "failed"]
+        (retry,) = [a for a in history if a.retry_of]
+
+        def check(attempt_id: str, params: dict[str, Any]) -> None:
+            ledger.check_retry(
+                attempt_id, strategy="trend_pullback", variant="m15", params=params,
+                first_day=date(2026, 9, 14), last_day=date(2026, 9, 15), purpose="evaluation",
+                grid_id=retry.grid_id,
+            )  # fmt: skip
+
+        with pytest.raises(LedgerError, match="nothing to retry"):
+            check(retry.attempt_id, retry.params)
+        with pytest.raises(LedgerError, match="exact grid point"):
+            check(failed.attempt_id, {**failed.params, "target_r": 1.0})
+        with pytest.raises(LedgerError, match="already retried"):
+            check(failed.attempt_id, failed.params)
+    assert (failed.stage, retry.retry_of, retry.status) == (
+        "simulate",
+        failed.attempt_id,
+        "succeeded",
+    )
+    assert len({json.dumps(a.params, sort_keys=True) for a in history}) == 27
+    with TrialLedger(ledger_path(data)) as ledger:  # a crash leaves an attempt without outcome
+        crashed = ledger.start_attempt(
+            strategy="trend_pullback", variant="m5", params={}, first_day=date(2026, 9, 14),
+            last_day=date(2026, 9, 15), purpose="evaluation",
+        )  # fmt: skip
+        assert ledger.get_attempt(crashed).status == "unfinished"

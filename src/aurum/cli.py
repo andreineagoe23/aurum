@@ -739,6 +739,50 @@ def backtest_run(
     console.print(f"trades sha256: {outcome.manifest.get('outputs', {}).get('trades', '?')}")
 
 
+@backtest_app.command("grid")
+def backtest_grid(
+    strategy: str,
+    from_: Annotated[str, typer.Option("--from", help="First trading date YYYY-MM-DD")],
+    to: Annotated[str, typer.Option("--to", help="Last trading date YYYY-MM-DD (inclusive)")],
+    variant: Annotated[str, typer.Option(help="m15 or m5 (decision timeframe)")] = "m15",
+    retry_failed: Annotated[
+        bool, typer.Option("--retry-failed", help="Retry points whose last attempt failed")
+    ] = False,
+) -> None:
+    """Run the strategy's declared search grid: one ledger attempt per point, every outcome
+    kept. Points that succeeded earlier are not rerun; failed ones only with --retry-failed.
+    Exits 1 while any point is unresolved."""
+    from aurum.backtest.grid import run_grid
+
+    settings = _settings_or_exit()
+    try:
+        results = run_grid(
+            settings,
+            strategy=strategy,
+            variant=variant,
+            first=date.fromisoformat(from_),
+            last=date.fromisoformat(to),
+            retry_failed=retry_failed,
+            runs=_runs(settings),
+            clock=SystemClock(),
+        )
+    except (AurumError, FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    table = Table(title=f"grid {strategy} {variant} {from_}..{to}")
+    for col in ("params", "status", "attempt", "trial / detail"):
+        table.add_column(col)
+    for r in results:
+        params = " ".join(f"{k}={v}" for k, v in r.params.items())
+        table.add_row(params, r.status, r.attempt_id or "", r.trial_id or r.detail)
+    console.print(table)
+    unresolved = [r for r in results if r.status in ("failed", "not retried")]
+    console.print(f"{len(results)} points: {len(results) - len(unresolved)} resolved, "
+                  f"{len(unresolved)} unresolved")  # fmt: skip
+    if unresolved:
+        raise typer.Exit(1)
+
+
 @backtest_app.command("report")
 def backtest_report(
     run_id: str,

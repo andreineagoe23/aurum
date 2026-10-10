@@ -145,6 +145,18 @@ _Last updated: 2026-10-10._
      the decision-time check in `on_bar` duplicates the one in the trigger and setup rules.
    - **Real-data trace:** development-period bars reproduce the spec trace at
      2024-03-01 14:15Z exactly (no P&L computed).
+   **Second review (2026-10-10), fixed. No trial run, no sealed opening:**
+   - **Parity exemption narrowed** (54c2470): only `reference_fixed_time` m5, inside
+     2026-09-14 … 10-08, in the tester context, via `--parity`, journalled in
+     `parity_accesses`. Ordinary reference backtests are sealed too.
+   - **`data_gap` defined** (8b91d8c): one per decision time with a missing bar in the
+     variant's read set.
+   - **Literal restart-after-deadline test** (e758221).
+   - **Durable attempts and the grid runner:** every evaluation is a ledger attempt before it
+     runs, and failures keep their stage and error. Retries are explicit and linked.
+     `aurum backtest grid` runs only the declared 27 points per variant. All of this is
+     tested on synthetic data only.
+   **Claude stops for review again before running any of the 54 trials.**
 8. **Evaluate only the registered thresholds**; never open the sealed period.
 9. **Phase 3b replay only when triggered**; link the worst- and best-case runs.
 10. **Select or reject the family**, only after all development and walk-forward evidence.
@@ -196,7 +208,9 @@ Nothing in the spec changes after step 7 starts. If every trial fails, the resul
   This is what no edge looks like after costs; judge every candidate against it. Rerun on
   c76a9d5 (prospective budget) as `20261010T002425547831Z_reference_fixed_time_m5_3322ec`:
   byte-identical trades (sha256 `447228f1…`). The budget never binds for this strategy (at
-  most one ~$20 trade a day, far from the $250 weekly limit).
+  most one ~$20 trade a day, far from the $250 weekly limit). **Since 54c2470 the sealed
+  period applies to the reference strategy too:** a baseline rerun or comparison for Phase 5
+  ends 2025-09-30, the end of the development period.
 
 ## Environment facts
 

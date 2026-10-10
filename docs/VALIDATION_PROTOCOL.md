@@ -14,6 +14,14 @@ Rules from MASTER_PROMPT Phases 5-6 and section 4 rules 9-11. Implementation det
 - Append-only SQLite (`aurum.ledger.trial_ledger`). UPDATE and DELETE are blocked by triggers; each row carries a content hash and an immutable trial id.
 - One row per run: strategy, variant, parameters, data range, costs, metrics, code/config hash.
 - Reports must state the total trial count. The count feeds the Deflated Sharpe Ratio.
+- **Attempts** (`attempts`, `attempt_outcomes`): every evaluation is recorded before it runs and
+  ends as a trial or as a failure with its stage and error. A crash leaves it `unfinished`.
+  - Invalid requests and sealed refusals are not attempts.
+  - A retry names the failed or unfinished attempt it repeats (same grid point, once) and is
+    never another grid point.
+  - `aurum backtest grid` runs only a strategy's declared grid. Done points are skipped,
+    failed ones are retried only with `--retry-failed`, and it exits non-zero while any point
+    is unresolved.
 - TODO(Phase 6): ledger schema extensions for fold-level results and report linkage.
 
 ## Intra-bar sensitivity and the Phase 3b trigger (Phase 5 report contract)
