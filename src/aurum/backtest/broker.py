@@ -23,6 +23,11 @@ Execution model (all prices USD/oz, volumes lots, money account currency):
   bar also reaches the stop (after the open), the stop is assumed first; if it reaches only
   the target, the close is assumed first and the target is not credited. Either way the trade
   is flagged ``CLOSE_BAR``. A bar that opens through the stop is a gap: STOP, not flagged.
+* **Cancels on bars.** A cancel arriving inside a bar that reaches a pending entry's level: if
+  the bar opened at or through the level the order filled before the cancel (certain, not
+  flagged); if only its range reached the level the order is assumed filled first (worst case:
+  an unwanted position) and the trade is flagged ``CANCEL_BAR`` whatever closes it. On ticks
+  a trigger before the cancel's quote fills, otherwise the cancel wins.
 * **Costs.** Commission ``commission_per_lot_side x volume`` on every fill, rounded to cents and
   booked negative (like the broker's deals). Profit is booked rounded to cents.
 * **Rules.** Volume min/max/step, stops level (minimum SL/TP and pending distance) and freeze
@@ -90,6 +95,9 @@ class IntrabarRule(StrEnum):
     CLOSE_BAR = "close_bar"
     """A requested close arrived inside a bar that also reached the stop (stop assumed first)
     or the target (close at the open assumed first, the target not credited)."""
+    CANCEL_BAR = "cancel_bar"
+    """A cancel arrived inside a bar whose range (not its open) reached the pending entry: the
+    entry is assumed to have filled first. Kept until the trade closes, over any exit rule."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +184,8 @@ class _Position:
     worst: float
     commission: float
     intrabar: IntrabarRule = IntrabarRule.NONE
+    cancel_bar: bool = False
+    """Entry assumed to precede a cancel in the same bar (``IntrabarRule.CANCEL_BAR``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -541,10 +551,21 @@ class SimBroker:
 
     def cancel_order(self, order_id: int) -> ExecutionReport:
         now = self._clock.now()
+        pending = self._book.orders.get(order_id)
         q = self._arrival_quote(now)
         order = self._book.orders.get(order_id)
         if order is None:
+            if pending is not None:  # triggered on a quote before the cancel's
+                return self._failed(
+                    now, f"order {order_id} filled before the cancel arrived", key=pending.key
+                )
             return self._failed(now, f"order {order_id} not found (filled or cancelled)")
+        if (
+            q is not None
+            and q.mode is DataMode.BARS
+            and (filled := self._cancel_bar_fill(order, q))
+        ):
+            return self._failed(now, f"order {order_id} {filled}", key=order.key)
         if q is not None and (reason := self._freeze_check_order(order, q)):
             return self._failed(now, reason, key=order.key)
         del self._book.orders[order_id]
@@ -694,6 +715,29 @@ class SimBroker:
             return None, IntrabarRule.CLOSE_BAR
         return None, IntrabarRule.NONE
 
+    def _cancel_bar_fill(self, order: _Order, q: Quote) -> str | None:
+        """A cancel arriving inside bar ``q.index`` (BARS): fill the order first if the bar
+        reached its level, and say how; None if the cancel goes through."""
+        open_ms = int(self._market.m1.open_time[q.index])
+        if q.time_ms <= open_ms:  # executes on the open quote: nothing in the bar precedes it
+            return None
+        seg = next(iter(self._market.segments(open_ms, open_ms + 1)), None)
+        if not isinstance(seg, BarSegment):
+            return None
+        if _first_trigger_bars(order.side, order.order_type, order.price, seg) is None:
+            return None
+        o_bid = float(seg.open[0])
+        if _pending_at_open(
+            order.side, order.order_type, order.price, o_bid, o_bid + float(seg.spread[0])
+        ):
+            self._fill_pending_bar(order, seg, 0, open_ms)
+            return "filled at the bar open before the cancel arrived"
+        self._fill_pending_bar(order, seg, 0, open_ms, cancel_bar=True)
+        return (
+            "filled before the cancel arrived under the cancel_bar assumption "
+            "(level reached inside the bar, order unknown)"
+        )
+
     def _max_wait_ms(self) -> int:
         return int(self._costs.max_quote_wait / timedelta(milliseconds=1))
 
@@ -824,6 +868,8 @@ class SimBroker:
             magic=pos.magic,
         )
         intrabar = exit_.intrabar if exit_.intrabar is not IntrabarRule.NONE else pos.intrabar
+        if pos.cancel_bar:
+            intrabar = IntrabarRule.CANCEL_BAR
         self._book.trades.append(
             SimTrade(
                 position_id=pos.position_id,
@@ -920,7 +966,9 @@ class SimBroker:
         )
         self._scan_position(pos, until_ms)
 
-    def _fill_pending_bar(self, order: _Order, seg: BarSegment, k: int, until_ms: int) -> None:
+    def _fill_pending_bar(
+        self, order: _Order, seg: BarSegment, k: int, until_ms: int, *, cancel_bar: bool = False
+    ) -> None:
         side, p = order.side, order.price
         spread = float(seg.spread[k])
         o_bid = float(seg.open[k])
@@ -951,6 +999,7 @@ class SimBroker:
             cursor_ms=open_ms,
             cursor_index=None,
         )
+        pos.cancel_bar = cancel_bar
         if not at_open:
             exit_ = self._entry_bar_exit(pos, seg, k)
             if exit_ is not None:

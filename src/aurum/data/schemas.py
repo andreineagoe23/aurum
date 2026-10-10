@@ -154,7 +154,9 @@ BACKTEST_TRADES = pa.schema(
 * ``mae_points``/``mfe_points``: largest adverse/favourable move of the exit-side price (bid for
   BUY, ask for SELL) from the entry price while open, in points.
 * ``intrabar_rule``/``worst_case``: whether a BARS-mode assumption decided the outcome
-  (``sl_tp_same_bar``: stop assumed before target; ``entry_bar``: entry/exit order assumed).
+  (``sl_tp_same_bar``: stop assumed before target; ``entry_bar``: entry/exit order assumed;
+  ``close_bar``: a requested close and a level in one bar; ``cancel_bar``: a pending entry
+  assumed filled before a cancel arriving in the same bar). ADR-0009 §5.
 """
 
 BACKTEST_EQUITY = pa.schema(

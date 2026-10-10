@@ -91,7 +91,7 @@ def test_summary_metrics() -> None:
         trade_row(1, sim_trade(profit=30.0), ExitReason.TARGET, spec(), "s", T),
         trade_row(
             2,
-            sim_trade(profit=-10.0, intrabar=IntrabarRule.SL_TP_SAME_BAR, entry_mode=DataMode.BARS),
+            sim_trade(profit=-10.0, intrabar=IntrabarRule.CANCEL_BAR, entry_mode=DataMode.BARS),
             ExitReason.STOP,
             spec(),
             "s",
@@ -116,7 +116,7 @@ def test_summary_metrics() -> None:
     assert s["max_drawdown"] == pytest.approx(30.0)
     assert s["worst_case_trades"] == 1
     assert s["worst_case_share"] == 0.5
-    assert s["intrabar_sl_tp_same_bar"] == 1
+    assert (s["intrabar_cancel_bar"], s["intrabar_sl_tp_same_bar"]) == (1, 0)
     assert s["trades_bar_mode"] == 1
     assert s["exit_target"] == 1
     assert s["exit_stop"] == 1

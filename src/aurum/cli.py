@@ -644,6 +644,7 @@ _SUMMARY_ROWS = (
     ("  stop+target same bar", "intrabar_sl_tp_same_bar"),
     ("  entry+exit same bar", "intrabar_entry_bar"),
     ("  close+level same bar", "intrabar_close_bar"),
+    ("  cancel+entry same bar", "intrabar_cancel_bar"),
     (
         "exits stop/target/inval/timeout/flat/eod",
         (

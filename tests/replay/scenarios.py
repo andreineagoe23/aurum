@@ -21,7 +21,7 @@ from typing import Any
 
 from aurum.backtest.broker import RejectionHook
 from aurum.backtest.market import HistoricalMarket
-from aurum.core.enums import Side
+from aurum.core.enums import OrderType, Side
 from aurum.core.models import SymbolSpec
 from tests.simdata import DAY, BarRow, Plan, TickRow, at, flat_m1, market, spec
 
@@ -360,6 +360,50 @@ CLOSE_BAR_TARGET = _close_bar(
     },
 )
 
+# ----------------------------------------------------------- cancel and an entry in one bar
+# Phase 4 issue 7 (reviewer decision 2026-10-10): the morning session ends at 10:00 UTC, the
+# engine cancels the pending BUY STOP and the cancel arrives at 10:00:00.200, inside an M1 bar
+# that opens below the entry but whose high crosses it. The order inside the bar is unknown:
+# the entry is assumed first (worst case, an unwanted position) and the trade is flagged
+# cancel_bar until it closes. Before the fix the cancel took effect at the open, unflagged.
+CANCEL_BAR = Scenario(
+    name="cancel_and_entry_in_one_bar",
+    build=bars_only(
+        [
+            *flat_m1("09:50", "09:59"),  # ask high 2000.22: the 2000.50 entry is not reached
+            ("10:00", 2000.00, 2000.60, 1999.90, 2000.30, 10),  # ask 2000.12 open, 2000.72 high
+            *flat_m1("10:01", "10:30"),
+        ]
+    ),
+    plans={
+        at("09:55"): Plan(
+            Side.BUY,
+            1995.00,
+            max_hold=timedelta(minutes=30),
+            entry_type=OrderType.STOP,
+            entry_price=2000.50,
+        )
+    },
+    expected=[
+        {
+            "entry_type": "STOP",
+            "entry_time": at("10:00"),  # bar open (intra-bar fills carry the bar's open time)
+            "entry_price": 2000.55,  # 2000.50 + 0.05 stop-entry slippage
+            "exit_time": at("10:25:00.200"),  # deadline 09:55 + 30 min, + latency
+            "exit_price": 1999.95,  # bar open 2000.00 - 0.05
+            "exit_reason": "TIMEOUT",
+            "net_pnl": -12.90,  # (1999.95 - 2000.55) x 20 = -12.00, - 0.90
+            "spread_cost": 2.40,  # (0.12/2 + 0.12/2) x 20
+            "slippage_cost": 2.00,
+            "gross_pnl": -7.60,  # mid 2000.44 -> 2000.06
+            "entry_mode": "bars",
+            "intrabar_rule": "cancel_bar",
+            "worst_case": True,
+        }
+    ],
+    journal=(("cancel_failed", "filled before the cancel arrived under the cancel_bar"),),
+)
+
 SCENARIOS = [
     GAP_TICKS,
     GAP_BARS,
@@ -374,4 +418,5 @@ SCENARIOS = [
     MIN_STOP,
     CLOSE_BAR_STOP,
     CLOSE_BAR_TARGET,
+    CANCEL_BAR,
 ]

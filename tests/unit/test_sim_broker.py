@@ -237,6 +237,21 @@ def test_pending_price_must_respect_side_and_cancel_works() -> None:
     assert broker.cancel_order(placed.order_id).status is ExecutionStatus.REJECTED
 
 
+def test_tick_mode_cancel_keeps_the_exact_order() -> None:
+    # BUY STOP 2000.25; the 08:00:00.300 tick (ask 2000.30) triggers it.
+    for cancel_at, filled in (("08:00:00.250", False), ("08:00:00.500", True)):
+        broker, clock = sim(market(ticks={DAY: TAPE}), start="08:00")
+        stop = order(sl=1999.00, tp=None, entry_type=OrderType.STOP, entry_price=2000.25)
+        placed = broker.send_order(stop)
+        assert placed.order_id is not None
+        clock.set(at(cancel_at))
+        report = broker.cancel_order(placed.order_id)
+        # .250 executes on the .300 tick itself: the cancel wins. .500: the trigger came first.
+        assert (report.status is ExecutionStatus.REJECTED) is filled, (cancel_at, report)
+        assert len(broker.positions()) == filled, cancel_at
+        assert ("filled before the cancel arrived" in (report.message or "")) is filled
+
+
 def test_modify_position_validates_stops_and_freeze_level() -> None:
     broker = ticks_sim()
     broker.send_order(order(sl=1999.00, tp=None))
@@ -318,6 +333,50 @@ def test_bar_mode_limit_target_not_credited_in_entry_bar() -> None:
     assert trade.exit_price == 1998.00  # 08:02 opened below the stop
     assert trade.intrabar is IntrabarRule.ENTRY_BAR
     assert trade.profit == pytest.approx(-32.00)
+
+
+def test_bar_mode_cancel_inside_a_bar_resolves_the_entry_first() -> None:
+    """Cancel arriving 200 ms into a bar (freeze level 2.00, applied only if still pending)."""
+    cases = [
+        # side, entry, stop, cancel at, report message (None = cancelled), trade's rule
+        (Side.BUY, 2002.50, 1999.00, "08:01", None, None),  # 08:01 ask high 2001.32: no touch
+        (Side.BUY, 2001.50, 1999.00, "08:01", "frozen", None),  # 1.18 from the ask open
+        (Side.SELL, 1999.00, 2000.00, "08:02", "at the bar open", IntrabarRule.NONE),
+        (Side.BUY, 2001.00, 1999.50, "08:01", "cancel_bar assumption", IntrabarRule.CANCEL_BAR),
+    ]
+    for side, entry, sl, cancel_at, message, rule in cases:
+        broker, clock = sim(
+            market(m1=BARS, extra_points=2),
+            start="08:00",
+            latency_ms=200,
+            symbol_spec=spec(freeze_level=200),
+        )
+        placed = broker.send_order(
+            order(side, sl=sl, tp=None, entry_type=OrderType.STOP, entry_price=entry)
+        )
+        assert placed.order_id is not None
+        clock.set(at(cancel_at))
+        report = broker.cancel_order(placed.order_id)
+        assert broker.orders() == [] or message == "frozen", entry
+        if message is None:
+            assert report.status is ExecutionStatus.CANCELLED, (entry, report)
+            continue
+        assert report.status is ExecutionStatus.REJECTED, entry
+        assert message in (report.message or ""), (entry, report.message)
+        if rule is None:
+            continue
+        clock.set(at("08:03"))
+        for p in broker.positions():
+            broker.close_position(p.position_id)
+        (trade,) = broker.trades
+        assert trade.intrabar is rule, entry
+        if rule is IntrabarRule.CANCEL_BAR:
+            # Filled at 2001.00 inside 08:01, whose low 1999.40 also takes the stop: the
+            # same-bar stop doesn't replace the cancel_bar flag.
+            assert (trade.entry_price, trade.exit_reason) == (2001.00, DealReason.STOP_LOSS)
+            assert trade.profit == pytest.approx(-30.00)
+        else:
+            assert trade.entry_price == 1998.00  # SELL STOP at the 08:02 open bid (gap)
 
 
 def test_bar_mode_close_and_excursions_from_bar_ranges() -> None:

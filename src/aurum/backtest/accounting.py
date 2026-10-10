@@ -209,6 +209,7 @@ def summarize(
         "intrabar_sl_tp_same_bar": rules.get(str(IntrabarRule.SL_TP_SAME_BAR), 0),
         "intrabar_entry_bar": rules.get(str(IntrabarRule.ENTRY_BAR), 0),
         "intrabar_close_bar": rules.get(str(IntrabarRule.CLOSE_BAR), 0),
+        "intrabar_cancel_bar": rules.get(str(IntrabarRule.CANCEL_BAR), 0),
     }
     for reason in ExitReason:
         out[f"exit_{reason.value.lower()}"] = reasons.get(str(reason), 0)
