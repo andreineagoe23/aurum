@@ -15,6 +15,7 @@ from aurum.backtest.loading import load_market
 from aurum.backtest.storage import new_run_id, read_manifest, read_trades
 from aurum.cli import app
 from aurum.core.errors import SealedPeriodError
+from aurum.core.timeframes import Timeframe
 from aurum.ledger.trial_ledger import TrialLedger
 from tests.sim_store import write_store
 
@@ -58,6 +59,7 @@ def test_run_writes_outputs_and_records_a_trial(env: tuple[Path, Path]) -> None:
     assert manifest["params"]["variant"] == "m5"
     assert f"trades sha256: {manifest['outputs']['trades']}" in output
     assert manifest["params"]["risk_engine"] == "PolicyRiskEngine"
+    assert (manifest["warmup_bars"], manifest["first_data_day"]) == ({}, "2026-09-04")
     trades = read_trades(RunLayout(runs), run_id)
     # The 08:00 BUY trades on both days (one tick day, one bar day). The 14:30 SELL's
     # 3000-point stop needs ~30 USD at 0.01 lot: over the 25 USD budget (0.25% of 10,000).
@@ -180,6 +182,33 @@ def test_sealed_period_is_refused_then_opened_once_and_journalled(
         "frozen",
     )
     assert [t.sealed_test_opened for t in trials] == [False, True]
+
+
+def test_warmup_is_loaded_by_bar_count(tmp_path: Path) -> None:
+    # Thu 09-10 and Fri 09-11 have 21 H1 bars each; trading starts Mon 09-14 (London midnight
+    # = 09-13 23:00 UTC, so whole UTC days before 09-13 count).
+    thu, fri, mon = date(2026, 9, 10), date(2026, 9, 11), date(2026, 9, 14)
+    layout = write_store(tmp_path, tick_days=[], bar_days=[thu, fri, mon])
+    common = {"point": 0.01, "first": mon, "last": mon, "warmup_days": 0}
+    loaded = load_market(
+        layout, "XAUUSD", **common, bar_spread_extra_points=2,
+        warmup_bars={Timeframe.H1: 30}, warmup_before=date(2026, 9, 13),
+    )  # fmt: skip
+    assert loaded.first_data_day == thu  # 21 on Friday are not enough; Thursday adds 21
+    first_decision = datetime(2026, 9, 13, 23, tzinfo=UTC)
+    assert len(loaded.market.store.view_at(first_decision).bars(Timeframe.H1)) == 2 * 21
+    no_warmup = load_market(layout, "XAUUSD", **common, bar_spread_extra_points=2)
+    assert no_warmup.first_data_day == mon
+    with pytest.raises(ValueError, match="warm-up needs 100 completed H1 bars"):
+        load_market(
+            layout, "XAUUSD", **common, bar_spread_extra_points=2,
+            warmup_bars={Timeframe.H1: 100}, warmup_before=date(2026, 9, 13),
+        )  # fmt: skip
+    with pytest.raises(SealedPeriodError):  # warm-up history may not come from it either
+        load_market(
+            layout, "XAUUSD", **common, bar_spread_extra_points=2,
+            warmup_bars={Timeframe.H1: 30}, warmup_before=date(2026, 9, 13), sealed=(thu, thu),
+        )  # fmt: skip
 
 
 def test_run_ids_sort_by_creation_within_one_second() -> None:

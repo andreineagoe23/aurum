@@ -1,6 +1,9 @@
 """Load the Phase 2 store into a ``HistoricalMarket`` for a backtest period.
 
-* Canonical bars (M1/M5/M15/H1) for UTC days ``first - warmup_days .. last + 1``.
+* Canonical bars (M1/M5/M15/H1) for UTC days ``lo .. last + 1``. ``lo`` is
+  ``first - warmup_days``, or earlier when the strategy declares ``warmup_bars``: whole UTC days
+  before the first decision are counted back (Parquet row counts, no data read) until every
+  timeframe has its bars. Too little history is an error, never a short warm-up.
 * Normalized ticks only for days in ``first..last`` whose tick fidelity is ``exact``
   (``canonical_bars/days``, ADR-0007), loaded lazily one day at a time.
 * Research runs pass the sealed final-test period: any data file dated inside it is refused
@@ -11,6 +14,7 @@
 """
 
 import hashlib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -37,6 +41,8 @@ class LoadedMarket:
     tick_days: list[date]
     bar_days: list[date]
     """Days in ``first..last`` with M1 bars but no exact ticks (BARS mode)."""
+    first_data_day: date
+    """Start of the load range: the earliest UTC day any bar file could come from."""
 
     def data_hash(self, root: Path) -> str:
         h = hashlib.sha256()
@@ -75,20 +81,45 @@ def load_market(
     bar_spread_extra_points: int,
     last_data_day: date | None = None,
     sealed: tuple[date, date] | None = None,
+    warmup_bars: Mapping[Timeframe, int] | None = None,
+    warmup_before: date | None = None,
 ) -> LoadedMarket:
-    """``last_data_day`` defaults to ``last + 1`` (UTC). ``sealed``: dates no file may come from."""
+    """``last_data_day`` defaults to ``last + 1`` (UTC). ``sealed``: dates no file may come from.
+    ``warmup_bars``: completed bars per timeframe needed from whole UTC days before
+    ``warmup_before`` (the UTC date of the first decision instant; default ``first``)."""
     if last < first:
         raise ValueError(f"empty period {first}..{last}")
     lo = first - timedelta(days=warmup_days)
     hi = last + timedelta(days=1) if last_data_day is None else last_data_day
 
-    def allowed(paths: list[Path], days: list[date]) -> list[Path]:
+    def refuse_sealed(days: list[date]) -> None:
         if sealed is not None and any(sealed[0] <= d <= sealed[1] for d in days):
             raise SealedPeriodError(
                 f"refusing to read {symbol} data dated in the sealed period "
                 f"{sealed[0]}..{sealed[1]} (requested {lo}..{hi})"
             )
+
+    def allowed(paths: list[Path], days: list[date]) -> list[Path]:
+        refuse_sealed(days)
         return paths
+
+    for tf, needed in (warmup_bars or {}).items():
+        before = warmup_before or first
+        counted = 0
+        for d in sorted(days_in(layout.canonical_bars_dir(symbol, tf)), reverse=True):
+            if d >= before:
+                continue
+            refuse_sealed([d])  # before reading even the row count
+            rows = pl.scan_parquet(layout.canonical_bars(symbol, tf, d)).select(pl.len())
+            counted += int(rows.collect().item())
+            if counted >= needed:
+                lo = min(lo, d)
+                break
+        else:
+            raise ValueError(
+                f"warm-up needs {needed} completed {tf} bars before {before}; "
+                f"only {counted} in the store"
+            )
 
     files: list[Path] = []
     bars: dict[Timeframe, BarSeries] = {}
@@ -131,4 +162,5 @@ def load_market(
         files=sorted(files),
         tick_days=sorted(exact),
         bar_days=sorted(m1_days - exact),
+        first_data_day=lo,
     )

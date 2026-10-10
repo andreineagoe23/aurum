@@ -7,6 +7,7 @@ orders: the risk engine decides, the broker executes. The same object runs uncha
 BACKTEST, SHADOW and DEMO.
 """
 
+from collections.abc import Mapping
 from typing import Protocol
 
 from aurum.core.models import PositionState, Signal
@@ -23,6 +24,12 @@ class Strategy(Protocol):
     @property
     def decision_timeframe(self) -> Timeframe:
         """Entries are considered only at closes of this timeframe (M15 or M5 variant)."""
+        ...
+
+    @property
+    def warmup_bars(self) -> Mapping[Timeframe, int]:
+        """Completed bars per timeframe needed before the first decision. Backtests load history
+        by this count (not by calendar days); warm-up bars never produce a decision."""
         ...
 
     def on_bar(self, view: MarketView) -> Signal | None:

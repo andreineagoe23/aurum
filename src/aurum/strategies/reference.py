@@ -17,6 +17,7 @@ No invalidation rule: exits are the stop, the target, ``max_hold`` and force-fla
 """
 
 import math
+from collections.abc import Mapping
 from datetime import time, timedelta
 from typing import Self
 
@@ -82,6 +83,10 @@ class FixedTimeReference:
     @property
     def decision_timeframe(self) -> Timeframe:
         return self._tf
+
+    @property
+    def warmup_bars(self) -> Mapping[Timeframe, int]:
+        return {}  # decides from the newest bar only
 
     def on_bar(self, view: MarketView) -> Signal | None:
         now = view.now

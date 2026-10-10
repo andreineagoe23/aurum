@@ -98,6 +98,12 @@ def execute(
         code_version=code_version,
         clock=clock,
     )
+    strategy = build_strategy(
+        cfg.strategies[request.strategy], variant=request.variant, symbol=symbol, point=spec.point
+    )
+    hours = MarketHours(cfg.data.market)
+    calendar = TradingCalendar(cfg.sessions, hours)
+    start = calendar.local_to_utc(request.first, datetime.min.time())
     layout = DataLayout(settings.data_dir)
     loaded = load_market(
         layout,
@@ -109,13 +115,10 @@ def execute(
         bar_spread_extra_points=bt.bar_spread_extra_points,
         last_data_day=access.last_data_day,
         sealed=access.forbidden,
+        warmup_bars=strategy.warmup_bars,
+        warmup_before=start.date(),
     )
-    strategy = build_strategy(
-        cfg.strategies[request.strategy], variant=request.variant, symbol=symbol, point=spec.point
-    )
-    hours = MarketHours(cfg.data.market)
-    calendar = TradingCalendar(cfg.sessions, hours)
-    sim_clock = ManualClock(calendar.local_to_utc(request.first, datetime.min.time()))
+    sim_clock = ManualClock(start)
     commission = cfg.broker.commission.per_lot_per_side
     broker = SimBroker(
         market=loaded.market,
@@ -208,6 +211,8 @@ def execute(
         "params": params,
         "notes": request.notes,
         "sealed_opened": access.opened,
+        "warmup_bars": {str(tf): n for tf, n in strategy.warmup_bars.items()},
+        "first_data_day": loaded.first_data_day.isoformat(),
     }
     with TrialLedger(ledger_path(settings.data_dir)) as ledger:
         trial = ledger.record_trial(

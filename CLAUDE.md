@@ -83,7 +83,12 @@ Its job is to tell the truth, not to make backtests look good.
   quote at or after `now + latency`. Bar-only days use the worst-case intra-bar rule and flag the
   trade (`intrabar_rule`, `worst_case`). Every `aurum backtest run` records a trial and writes
   `reports/runs/<id>/` (git-ignored) with output hashes; reruns must be byte-identical
-  (`aurum backtest compare`).
+  (`aurum backtest compare`). Warm-up is loaded by the strategy's `warmup_bars` count, not
+  calendar days.
+- Sealed final-test period (`backtest.yaml` `sealed_period`, 2025-10-01 … 2026-10-08): research
+  backtests never read it. The loader refuses its files before reading. It is opened once per
+  strategy and variant with `--open-sealed --by --reason`, journalled first. Never inspect it
+  during Phase 5.
 - Golden replay (`tests/replay/scenarios.py`): any change to an expected number needs a
   stated reason in the commit; bugs become new scenarios. Hooks must be stateless.
 - Parity: `mql5/AurumReference.mq5` mirrors `reference_fixed_time`; compare with
