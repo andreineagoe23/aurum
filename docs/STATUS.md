@@ -15,7 +15,7 @@ _Last updated: 2026-10-10._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **Approved with conditions; ready to begin, not started.** All six pre-Phase-5 items are done; waiting for the user's review before starting | — |
+| 5 Strategy lab | **Started 2026-10-10** (reviewer approved f561a4d). All six pre-Phase-5 items done. First step: `docs/strategies/trend_pullback.md` **DRAFT 0.1.0, awaiting owner approval** (its section 0 decisions); no strategy code, no backtest of it | — |
 
 ## Work queue (in order)
 
@@ -75,10 +75,11 @@ _Last updated: 2026-10-10._
    reference strategy's 14:30 SELL (3,000 points) risks 30.095 at 0.01 lot, hence all 1,524
    rejections.
 
-   **Source of truth, open:** the only *tracked* record of the XAUUSD contract is
-   `reports/phase_1.md`, measured on the old **GBP** account. The USD-account values above
-   come from the data-dir snapshot, which is not in git. Record them in a tracked doc when
-   the next spec is written (or re-run `aurum mt5 symbols --find gold`).
+   **Source of truth:** until 2026-10-10 the only *tracked* record of the XAUUSD contract was
+   `reports/phase_1.md`, measured on the old **GBP** account. The USD-account values (point,
+   volume min/step, `tick_value`/`tick_size`, from snapshot `20261010T000046Z.json`) are now
+   recorded in `docs/strategies/trend_pullback.md` §8a. Re-check them against a fresh snapshot
+   whenever a spec is approved.
 6. ~~**CI**~~ — **done**: `.github/workflows/ci.yml` (GitHub Actions).
    - **Runs on:** push to `main`, every pull request, and manual dispatch.
    - **Matrix:** `ubuntu-latest` and `macos-latest`, Python 3.12 (`fail-fast: false`).
@@ -108,9 +109,14 @@ _Last updated: 2026-10-10._
      `files = ["src"]`; pytest imports and runs the tests. That command fails before checking
      (`test_mt5_adapter.py` "found twice under different module names"), and tests are not
      reorganised for it.
-   - **Pending until pushed:** the first Actions run on Linux and macOS (exact coverage there,
-     cache, artifact upload). No README badge: the repo is private, so the badge image does not
-     render outside GitHub sessions with access.
+   - **First run green.** f561a4d is on remote `main` (pushed by the user); run 38040512143.
+     Both jobs passed every step: **382 passed, 11 skipped** (all 11 MT5 integration tests
+     skipped). Coverage was identical on both: lines 5,787/6,163 = 93.90%, branches
+     1,145/1,374 = 83.33%, **combined 91.97%**. uv 0.12.24 installed from the lock unchanged;
+     cache saved; artifacts `coverage-ubuntu-latest-py3.12` and `coverage-macos-latest-py3.12`
+     uploaded.
+   - No README badge: the repo is private, so the badge image does not render outside GitHub
+     sessions with access.
 
 ### B. Later, tracked
 
@@ -122,6 +128,13 @@ _Last updated: 2026-10-10._
 - Watchdog scheduling waits for the Phase 7/8 trader loops (Phase 4 issue 6).
 - Add each year's FOMC dates to `configs/risk.yaml` in time (`aurum doctor` warns 60 days
   ahead; current list ends 2026-12-09) and future market holidays to `configs/data.yaml`.
+- **Tighten the CI coverage floor** (reviewer, 2026-10-10) after comparing a few CI runs, not on
+  one hypothesis-driven branch. If both platforms stay ≥ 91.95%, use `--cov-fail-under=91.90`;
+  if one is lower, set it slightly below the lowest reproducible total. Never lower it
+  silently. First run: 91.97% on both.
+- **Run the collector from a versioned release environment**, not the editable dev install.
+  Today it holds the dev venv's `aurum.exe` open, coupling development to the live process (see
+  Environment facts).
 
 ### C. User actions (not Claude's)
 
@@ -129,14 +142,15 @@ _Last updated: 2026-10-10._
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Push and check the first CI run** (`.github/workflows/ci.yml`). Linux/macOS have never run
-  the suite; read the coverage total from the job log and raise the floor if it allows.
+- **Review and approve `docs/strategies/trend_pullback.md`** (DRAFT 0.1.0): decisions D1–D5 in
+  its section 0. It becomes the pre-registered spec only after approval.
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
 - Write each strategy spec (`docs/STRATEGY_SPEC_TEMPLATE.md`) **before any code**, including the
-  stop-size cap (§8a, derived per spec). The reviewer offered to draft the trend-pullback
-  spec — ask the user.
+  stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
+  reviewer's request, awaiting approval. Then opening-range breakout and VWAP reversion, one at
+  a time.
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
@@ -157,11 +171,15 @@ _Last updated: 2026-10-10._
   collector runs there continuously; don't stop it.
 - **Editing `pyproject.toml` on the VM breaks `uv run` while the collector runs.** uv sees the
   file's new mtime, rebuilds the editable install, and fails to replace
-  `C:\venvs\aurum\Scripts\aurum.exe` (os error 32), which the collector holds open. Use
-  `uv run --no-sync …` until the collector is next restarted. Found 2026-10-10; that edit was
-  reverted.
+  `C:\venvs\aurum\Scripts\aurum.exe` (os error 32), which the collector holds open. Found
+  2026-10-10; that edit was reverted. Until the collector's next deliberate restart:
+  - don't change `pyproject.toml` on this checkout;
+  - run commands as `uv run --no-sync …`;
+  - make dependency changes (e.g. for Phase 5) in another checkout, or restart the collector
+    deliberately;
+  - never work around this by editing file timestamps.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
 - Test suite: 393 tests (384 passed, 9 skipped on the VM: 6 live-market checks with the market
   closed, 2 demo-order tests, 1 non-Windows test), ~65–90 s with coverage, 92.07% combined on
-  the VM (2026-10-10). Keep it lean (see `CLAUDE.md`). CI checks the same suite on Linux/macOS
-  (item 6).
+  the VM (2026-10-10). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 382 passed,
+  11 skipped, 91.97% (item 6).
