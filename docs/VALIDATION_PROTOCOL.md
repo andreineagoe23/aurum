@@ -60,20 +60,29 @@ Owner decision D1, 2026-10-10; implemented in `aurum.backtest.sealed` and
 `aurum.backtest.loading`.
 
 - **Period:** 2025-10-01 … 2026-10-08, in `configs/backtest.yaml` `sealed_period` (required).
-- **Research backtests** (every family except `reference`):
+- **Every backtest** (research and reference alike):
   - a request whose trading dates overlap the period is refused (`SealedPeriodError`);
   - the loader refuses, **before reading**, any bar or tick file dated inside it, including
     warm-up history and the extra end day;
   - a run ending just before it loads data only up to the day before it.
 - **Opening:** `aurum backtest run … --open-sealed --by NAME --reason TEXT`, only for a
-  strategy whose config has an approved `spec:`.
+  research strategy whose config has an approved `spec:`.
   - It is journalled in the trial ledger (`sealed_openings`, append-only) **before** any data
     is read, so a crash still counts.
   - It is allowed **once per strategy and variant** (UNIQUE), and the trial row gets
     `sealed_test_opened = true`.
   - A request that does not overlap the period cannot spend the opening.
-- **Exempt:** `reference` (the no-edge simulator check, never selected). Its MT5 tester
-  parity window, 2026-09-14 … 10-08, lies inside the period.
+- **Parity exemption** (`sealed_period.parity_exemption`): only the MT5 Strategy Tester
+  comparison, with
+  `aurum backtest run reference_fixed_time … --parity --variant m5 --risk fixed
+  --latency-ms 0 --slippage-points 0`.
+  - It is limited to that strategy and variant, with trading dates inside 2026-09-14 …
+    10-08, and no calendar warm-up. The loader still refuses every sealed date outside the
+    window.
+  - Each access is journalled first in `parity_accesses`, apart from research trials and
+    openings; the trial row carries `purpose: parity`.
+  - It never spends an opening. Any other strategy, variant, date or context is refused,
+    and ordinary reference backtests are sealed like research ones.
 - **When:** opened once, against the pre-registered threshold, after the candidate and its
   parameters are frozen.
 - **Reporting:** the result shows the exact-tick subset (2026-06-26 onward, trades with

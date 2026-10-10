@@ -85,10 +85,13 @@ Its job is to tell the truth, not to make backtests look good.
   `reports/runs/<id>/` (git-ignored) with output hashes; reruns must be byte-identical
   (`aurum backtest compare`). Warm-up is loaded by the strategy's `warmup_bars` count, not
   calendar days.
-- Sealed final-test period (`backtest.yaml` `sealed_period`, 2025-10-01 … 2026-10-08): research
-  backtests never read it. The loader refuses its files before reading. It is opened once per
-  strategy and variant with `--open-sealed --by --reason`, journalled first. Never inspect it
-  during Phase 5.
+- Sealed final-test period (`backtest.yaml` `sealed_period`, 2025-10-01 … 2026-10-08): no
+  backtest reads it; the loader refuses its files before reading. Two journalled ways in:
+  - a research strategy's one-time `--open-sealed --by --reason` (once per strategy and
+    variant);
+  - `--parity` for `reference_fixed_time` m5 in 2026-09-14 … 10-08, in the tester context
+    only.
+  Never inspect it during Phase 5. Full-history reruns end 2025-09-30.
 - Golden replay (`tests/replay/scenarios.py`): any change to an expected number needs a
   stated reason in the commit; bugs become new scenarios. Hooks must be stateless.
 - Parity: `mql5/AurumReference.mq5` mirrors `reference_fixed_time`; compare with

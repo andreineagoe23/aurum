@@ -6,15 +6,15 @@
   timeframe has its bars. Too little history is an error, never a short warm-up.
 * Normalized ticks only for days in ``first..last`` whose tick fidelity is ``exact``
   (``canonical_bars/days``, ADR-0007), loaded lazily one day at a time.
-* Research runs pass the sealed final-test period: any data file dated inside it is refused
-  **before it is read** (`SealedPeriodError`), whether it would serve warm-up, the period or
-  the extra end day.
+* Backtests pass the sealed final-test period as ``forbidden`` date ranges: any data file dated
+  inside one is refused **before it is read** (`SealedPeriodError`), whether it would serve
+  warm-up, the period or the extra end day.
 * A SHA-256 over every input file (path relative to the data dir + file hash), recorded in the
   run manifest so a result can be tied to the exact data it saw.
 """
 
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -80,11 +80,12 @@ def load_market(
     warmup_days: int,
     bar_spread_extra_points: int,
     last_data_day: date | None = None,
-    sealed: tuple[date, date] | None = None,
+    forbidden: Sequence[tuple[date, date]] = (),
     warmup_bars: Mapping[Timeframe, int] | None = None,
     warmup_before: date | None = None,
 ) -> LoadedMarket:
-    """``last_data_day`` defaults to ``last + 1`` (UTC). ``sealed``: dates no file may come from.
+    """``last_data_day`` defaults to ``last + 1`` (UTC). ``forbidden``: date ranges no file may
+    come from.
     ``warmup_bars``: completed bars per timeframe needed from whole UTC days before
     ``warmup_before`` (the UTC date of the first decision instant; default ``first``)."""
     if last < first:
@@ -93,10 +94,11 @@ def load_market(
     hi = last + timedelta(days=1) if last_data_day is None else last_data_day
 
     def refuse_sealed(days: list[date]) -> None:
-        if sealed is not None and any(sealed[0] <= d <= sealed[1] for d in days):
+        hit = sorted(d for d in days if any(a <= d <= b for a, b in forbidden))
+        if hit:
             raise SealedPeriodError(
-                f"refusing to read {symbol} data dated in the sealed period "
-                f"{sealed[0]}..{sealed[1]} (requested {lo}..{hi})"
+                f"refusing to read {symbol} data dated in the sealed period ({hit[0]}, "
+                f"requested {lo}..{hi})"
             )
 
     def allowed(paths: list[Path], days: list[date]) -> list[Path]:

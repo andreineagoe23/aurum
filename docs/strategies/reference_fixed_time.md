@@ -40,7 +40,7 @@ closes (the EA does not model early closes).
 Aurum run: `20261009T221629Z_reference_fixed_time_m5_be6c94` (38 trades), made with
 
 ```
-uv run aurum backtest run reference_fixed_time --from 2026-09-14 --to 2026-10-08 --variant m5 --latency-ms 0 --slippage-points 0 --risk fixed
+uv run aurum backtest run reference_fixed_time --from 2026-09-14 --to 2026-10-08 --variant m5 --latency-ms 0 --slippage-points 0 --risk fixed --parity
 ```
 
 Trades are paired by UTC entry date and side. Tolerances (owner-confirmed 2026-10-10;

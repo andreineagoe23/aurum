@@ -10,11 +10,12 @@ from typer.testing import CliRunner
 
 from aurum.adapters.mt5.servertime import ServerTimeZone
 from aurum.adapters.mt5.tester import COLUMNS, read_tester_deals
-from aurum.adapters.storage.layout import RunLayout
+from aurum.adapters.storage.layout import RunLayout, ledger_path
 from aurum.backtest.parity import ParityTrade, Tolerance, compare, from_trades_frame
 from aurum.backtest.storage import read_trades
 from aurum.cli import app
 from aurum.core.enums import ExitReason, Side
+from aurum.ledger.trial_ledger import TrialLedger
 from tests.sim_store import write_store
 
 TZ = ServerTimeZone("America/New_York", 7)
@@ -261,10 +262,41 @@ def csv_from_run(
 
 
 def test_parity_cli_end_to_end(env: tuple[Path, Path], tmp_path: Path) -> None:
-    _, runs = env
+    data, runs = env
+    # The real sealed config: only the parity path, for the designated strategy, variant, window
+    # and tester context, may read these sealed days. Everything else is refused, unjournalled.
     args = ["backtest", "run", "reference_fixed_time", "--from", "2026-09-14", "--to", "2026-09-15"]
-    ran = runner.invoke(app, [*args, "--variant", "m5", "--latency-ms", "0", "--risk", "fixed"])
+    context = ["--variant", "m5", "--latency-ms", "0", "--slippage-points", "0", "--risk", "fixed"]
+    trend = ["backtest", "run", "trend_pullback", "--from", "2026-09-14", "--to", "2026-09-15"]
+    early = [
+        "backtest",
+        "run",
+        "reference_fixed_time",
+        "--from",
+        "2026-09-11",
+        "--to",
+        "2026-09-15",
+    ]
+    for name, argv, match in (
+        ("ordinary reference run", [*args, *context], "overlaps the sealed final-test period"),
+        ("wrong strategy", [*trend, *context, "--parity"], "only for reference_fixed_time m5"),
+        ("wrong variant", [*args, *context, "--parity", "--variant", "m15"], "only for"),
+        ("outside the window", [*early, *context, "--parity"], "outside the approved parity"),
+        ("not the tester context", [*args, "--variant", "m5", "--parity"], "tester context"),
+        ("both paths", [*args, *context, "--parity", "--open-sealed"], "separate paths"),
+    ):
+        refused = runner.invoke(app, argv)
+        assert refused.exit_code == 1, name
+        assert match in " ".join(refused.output.split()), (name, refused.output)
+    ran = runner.invoke(app, [*args, *context, "--parity"])
     assert ran.exit_code == 0, ran.output
+    with TrialLedger(ledger_path(data)) as ledger:
+        assert ledger.parity_accesses() == [
+            ("reference_fixed_time", "m5", date(2026, 9, 14), date(2026, 9, 15))
+        ]
+        assert ledger.sealed_openings() == []
+        (trial,) = ledger.list_trials()
+    assert trial.params["purpose"] == "parity"
     (run_id,) = RunLayout(runs).runs()
     trades = from_trades_frame(read_trades(RunLayout(runs), run_id))
     assert len(trades) == 4

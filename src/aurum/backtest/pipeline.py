@@ -55,6 +55,9 @@ class RunRequest:
     """The one-time, journalled opening of the sealed final-test period (aurum.backtest.sealed)."""
     opened_by: str = ""
     open_reason: str = ""
+    parity: bool = False
+    """The MT5 tester parity check of the designated reference strategy inside its approved
+    window (backtest.yaml sealed_period.parity_exemption); journalled, never an opening."""
 
 
 @dataclass(frozen=True)
@@ -118,10 +121,10 @@ def execute(
         point=spec.point,
         first=request.first,
         last=request.last,
-        warmup_days=bt.warmup_days,
+        warmup_days=bt.warmup_days if access.warmup_days is None else access.warmup_days,
         bar_spread_extra_points=bt.bar_spread_extra_points,
         last_data_day=access.last_data_day,
-        sealed=access.forbidden,
+        forbidden=access.forbidden,
         warmup_bars=strategy.warmup_bars,
         warmup_before=start.date(),
     )
@@ -183,6 +186,7 @@ def execute(
         **strategy.diagnostics(),
     }
     params: dict[str, Any] = {
+        "purpose": "parity" if access.parity else "evaluation",
         "strategy_params": cfg.strategies[request.strategy].params,
         "variant": request.variant,
         "symbol": symbol,

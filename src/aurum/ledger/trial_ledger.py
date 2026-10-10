@@ -62,6 +62,20 @@ CREATE TRIGGER IF NOT EXISTS sealed_no_update BEFORE UPDATE ON sealed_openings
 BEGIN SELECT RAISE(ABORT, 'sealed openings are append-only'); END;
 CREATE TRIGGER IF NOT EXISTS sealed_no_delete BEFORE DELETE ON sealed_openings
 BEGIN SELECT RAISE(ABORT, 'sealed openings are append-only'); END;
+CREATE TABLE IF NOT EXISTS parity_accesses (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    accessed_at  TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    variant      TEXT NOT NULL,
+    first_day    TEXT NOT NULL,
+    last_day     TEXT NOT NULL,
+    config_hash  TEXT,
+    code_version TEXT
+);
+CREATE TRIGGER IF NOT EXISTS parity_no_update BEFORE UPDATE ON parity_accesses
+BEGIN SELECT RAISE(ABORT, 'parity accesses are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS parity_no_delete BEFORE DELETE ON parity_accesses
+BEGIN SELECT RAISE(ABORT, 'parity accesses are append-only'); END;
 """
 
 
@@ -281,6 +295,42 @@ class TrialLedger:
                 code_version=r[8],
             )
             for r in cur.fetchall()
+        ]
+
+    def record_parity_access(
+        self,
+        *,
+        strategy: str,
+        variant: str,
+        first_day: date,
+        last_day: date,
+        config_hash: str | None,
+        code_version: str | None,
+    ) -> None:
+        """Journal one parity-exempt read inside the sealed period, before it happens. Kept
+        apart from research trials and from sealed openings."""
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO parity_accesses (accessed_at, strategy, variant, first_day, last_day,"
+                " config_hash, code_version) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    to_utc(self._clock.now()).isoformat(),
+                    strategy,
+                    variant,
+                    first_day.isoformat(),
+                    last_day.isoformat(),
+                    config_hash,
+                    code_version,
+                ),
+            )
+
+    def parity_accesses(self) -> list[tuple[str, str, date, date]]:
+        """(strategy, variant, first day, last day) of every parity access, oldest first."""
+        cur = self._conn.execute(
+            "SELECT strategy, variant, first_day, last_day FROM parity_accesses ORDER BY seq"
+        )
+        return [
+            (r[0], r[1], date.fromisoformat(r[2]), date.fromisoformat(r[3])) for r in cur.fetchall()
         ]
 
     def verify(self) -> list[str]:

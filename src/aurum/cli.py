@@ -694,11 +694,20 @@ def backtest_run(
     ] = False,
     by: Annotated[str, typer.Option("--by", help="Who opens the sealed period")] = "",
     reason: Annotated[str, typer.Option("--reason", help="Why the sealed period is opened")] = "",
+    parity: Annotated[
+        bool,
+        typer.Option(
+            "--parity",
+            help="MT5 tester parity check: only the designated reference strategy, inside its "
+            "approved window, with --risk fixed --latency-ms 0 --slippage-points 0 (journalled)",
+        ),
+    ] = False,
 ) -> None:
     """Run one backtest; writes reports/runs/<run_id>/ and records a trial in the ledger.
 
-    Research strategies never read the sealed final-test period (configs/backtest.yaml) unless
-    --open-sealed --by --reason is given, which is allowed once and journalled first."""
+    No backtest reads the sealed final-test period (configs/backtest.yaml) except a research
+    strategy's one-time --open-sealed --by --reason, or --parity for the designated reference
+    strategy inside its approved window; both are journalled first."""
     from aurum.backtest.pipeline import RunRequest, execute
 
     settings = _settings_or_exit()
@@ -714,6 +723,7 @@ def backtest_run(
         open_sealed=open_sealed,
         opened_by=by,
         open_reason=reason,
+        parity=parity,
     )
     if risk not in ("policy", "fixed"):
         console.print(f"[red]--risk must be policy or fixed, not {risk!r}[/red]")

@@ -56,7 +56,14 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
     assert app_config.backtest.latency_ms == 200
     sealed = app_config.backtest.sealed_period
     assert (sealed.first.isoformat(), sealed.last.isoformat()) == ("2025-10-01", "2026-10-08")
-    assert sealed.exempt_families == ["reference"]
+    parity = sealed.parity_exemption
+    assert parity is not None
+    assert (parity.strategy, parity.variant, parity.first.isoformat(), parity.last.isoformat()) == (
+        "reference_fixed_time",
+        "m5",
+        "2026-09-14",
+        "2026-10-08",
+    )
     assert not any(s.enabled for s in app_config.strategies.values())
 
 
@@ -79,7 +86,8 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
         ("broker", {"server_time": {"shift_hours": 30}}, "shift_hours"),
         ("broker", {"server_time": {"timezone": "Mars/Olympus"}}, "unknown timezone"),
         ("broker", {"commission": {"per_lot_per_side": -1}}, "per_lot_per_side"),
-        # Sealed final-test period (D1): ordered, and only the reference family may be exempt
+        # Sealed final-test period (D1): ordered; the parity exemption is one reference strategy
+        # and variant inside it, and nothing else
         ("backtest", {"sealed_period": {"first": "2026-10-08", "last": "2025-10-01"}}, "before"),
         (
             "backtest",
@@ -87,10 +95,42 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
                 "sealed_period": {
                     "first": "2025-10-01",
                     "last": "2026-10-08",
-                    "exempt_families": ["trend_pullback"],
+                    "exempt_families": ["reference"],
                 }
             },
-            "only the reference family",
+            "exempt_families",
+        ),
+        (
+            "backtest",
+            {
+                "sealed_period": {
+                    "first": "2025-10-01",
+                    "last": "2026-09-30",
+                    "parity_exemption": {
+                        "strategy": "reference_fixed_time",
+                        "variant": "m5",
+                        "first": "2026-09-14",
+                        "last": "2026-10-08",
+                    },
+                }
+            },
+            "inside",
+        ),
+        (
+            "backtest",
+            {
+                "sealed_period": {
+                    "first": "2025-10-01",
+                    "last": "2026-10-08",
+                    "parity_exemption": {
+                        "strategy": "trend_pullback",
+                        "variant": "m5",
+                        "first": "2026-09-14",
+                        "last": "2026-10-08",
+                    },
+                }
+            },
+            "reference-family",
         ),
     ],
 )

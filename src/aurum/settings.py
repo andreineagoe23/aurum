@@ -384,22 +384,32 @@ class DataConfig(_Config):
 StrategyFamily = Literal["trend_pullback", "opening_range_breakout", "vwap_reversion", "reference"]
 
 
+class ParityExemptionConfig(_Config):
+    """The one narrow exception to the seal: the MT5 Strategy Tester parity check of one
+    designated reference strategy and variant, inside one window (``--parity``)."""
+
+    strategy: str
+    variant: Literal["m15", "m5"]
+    first: date
+    last: date
+
+
 class SealedPeriodConfig(_Config):
-    """The sealed final-test period (owner decision D1, 2026-10-10). Research backtests never
-    read it unless opened once per strategy and variant, journalled (``aurum.backtest.sealed``)."""
+    """The sealed final-test period (owner decision D1, 2026-10-10). No backtest reads it,
+    except a research strategy's one-time journalled opening or the parity exemption, also
+    journalled (``aurum.backtest.sealed``)."""
 
     first: date
     last: date
-    exempt_families: list[StrategyFamily] = Field(default_factory=list)
-    """Families allowed to read it freely: only ``reference``, the no-edge simulator check
-    whose MT5 parity window lies inside the period and which is never selected."""
+    parity_exemption: ParityExemptionConfig | None = None
 
     @model_validator(mode="after")
     def _check(self) -> Self:
         if self.last < self.first:
             raise ValueError("sealed_period: last is before first")
-        if set(self.exempt_families) - {"reference"}:
-            raise ValueError("sealed_period: only the reference family may be exempt")
+        ex = self.parity_exemption
+        if ex is not None and not (self.first <= ex.first <= ex.last <= self.last):
+            raise ValueError("sealed_period: parity_exemption window must lie inside the period")
         return self
 
     def overlaps(self, first: date, last: date) -> bool:
@@ -468,6 +478,14 @@ class AppConfig(_Config):
             unknown = set(strat.sessions) - set(self.sessions.sessions)
             if unknown:
                 raise ValueError(f"strategy {strat.name} references unknown sessions {unknown}")
+        ex = self.backtest.sealed_period.parity_exemption
+        if ex is not None:
+            ref = self.strategies.get(ex.strategy)
+            if ref is None or ref.family != "reference" or ex.variant not in ref.variants:
+                raise ValueError(
+                    f"parity_exemption must name a reference-family strategy and one of its "
+                    f"variants, not {ex.strategy!r} {ex.variant!r}"
+                )
         return self
 
 

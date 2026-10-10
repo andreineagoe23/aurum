@@ -23,9 +23,24 @@ runner = CliRunner()
 TICK_DAY, BAR_DAY = date(2026, 9, 15), date(2026, 9, 14)  # Tuesday (exact ticks), Monday (bars)
 
 
+def use_configs(
+    tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch, sealed: dict[str, object]
+) -> None:
+    """The repo configs with another sealed period (tests of pipeline mechanics keep the seal
+    out of their synthetic days; the real seal is tested in test_parity.py)."""
+    configs = tmp_path / "configs"
+    shutil.copytree(repo_root / "configs", configs)
+    backtest = configs / "backtest.yaml"
+    cfg = yaml.safe_load(backtest.read_text(encoding="utf-8"))
+    cfg["sealed_period"] = sealed
+    backtest.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setenv("AURUM_CONFIG_DIR", str(configs))
+
+
 @pytest.fixture
-def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path]:
+def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, repo_root: Path) -> tuple[Path, Path]:
     data, runs = tmp_path / "data", tmp_path / "runs"
+    use_configs(tmp_path, repo_root, monkeypatch, {"first": "2030-01-07", "last": "2030-12-31"})
     write_store(data, tick_days=[TICK_DAY], bar_days=[BAR_DAY])
     monkeypatch.setenv("AURUM_DATA_DIR", str(data))
     monkeypatch.setenv("AURUM_RUNS_DIR", str(runs))
@@ -110,11 +125,11 @@ def test_unknown_strategy_or_run_fails_cleanly(env: tuple[Path, Path]) -> None:
     )
     assert bad.exit_code == 1
     assert "unknown strategy" in bad.output
-    sealed = runner.invoke(
+    short = runner.invoke(
         app, ["backtest", "run", "trend_pullback", "--from", "2026-09-14", "--to", "2026-09-15"]
     )
-    assert sealed.exit_code == 1
-    assert "sealed final-test period" in flat(sealed.output)
+    assert short.exit_code == 1  # two synthetic days: never a short warm-up
+    assert "warm-up needs 504 completed H1 bars" in flat(short.output)
     assert runner.invoke(app, ["backtest", "report", "missing"]).exit_code == 1
     bad_risk = runner.invoke(
         app,
@@ -134,40 +149,52 @@ def test_unknown_strategy_or_run_fails_cleanly(env: tuple[Path, Path]) -> None:
     assert "--risk must be policy or fixed" in bad_risk.output
 
 
-def test_sealed_period_is_refused_then_opened_once_and_journalled(
-    env: tuple[Path, Path], tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    data, runs = env
-    # The reference strategy as if it were research (not exempt; its spec is set), with the
-    # synthetic tick day inside the sealed period.
-    configs = tmp_path / "configs"
-    shutil.copytree(repo_root / "configs", configs)
-    backtest = configs / "backtest.yaml"
-    cfg = yaml.safe_load(backtest.read_text(encoding="utf-8"))
-    cfg["sealed_period"] = {"first": "2026-09-15", "last": "2026-10-08", "exempt_families": []}
-    backtest.write_text(yaml.safe_dump(cfg), encoding="utf-8")
-    monkeypatch.setenv("AURUM_CONFIG_DIR", str(configs))
-    base = ["backtest", "run", "reference_fixed_time", "--from", "2026-09-14", "--to"]
+@pytest.fixture(scope="module")
+def research_store(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """27 synthetic bar days, Mon 2025-08-04 .. Tue 2025-09-09: enough warm-up (504 H1 bars)
+    for trend_pullback before 2025-09-08."""
+    root = tmp_path_factory.mktemp("research") / "data"
+    days = [date(2025, 8, 4) + timedelta(days=i) for i in range(37)]
+    write_store(root, tick_days=[], bar_days=[d for d in days if d.weekday() < 5])
+    return root
 
-    refused = runner.invoke(app, [*base, "2026-09-15"])
+
+def test_research_seal_is_refused_then_opened_once_and_journalled(
+    research_store: Path, tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data, runs = tmp_path / "data", tmp_path / "runs"
+    shutil.copytree(research_store, data)
+    monkeypatch.setenv("AURUM_DATA_DIR", str(data))
+    monkeypatch.setenv("AURUM_RUNS_DIR", str(runs))
+    use_configs(tmp_path, repo_root, monkeypatch, {"first": "2025-09-09", "last": "2025-09-30"})
+    base = ["backtest", "run", "trend_pullback", "--from", "2025-09-08", "--to"]
+
+    refused = runner.invoke(app, [*base, "2025-09-09"])
     assert refused.exit_code == 1
     assert "overlaps the sealed final-test period" in flat(refused.output)
-    # A run ending the day before the seal must not even read its first day (the extra end day).
-    layout = DataLayout(data)
+    # Ending the day before the seal: the extra end day (09-09) is not even read.
     with pytest.raises(SealedPeriodError, match="refusing to read"):
         load_market(
-            layout, "XAUUSD", point=0.01, first=BAR_DAY, last=BAR_DAY, warmup_days=0,
-            bar_spread_extra_points=2, sealed=(TICK_DAY, TICK_DAY),
+            DataLayout(data), "XAUUSD", point=0.01, first=date(2025, 9, 8),
+            last=date(2025, 9, 8), warmup_days=0, bar_spread_extra_points=2,
+            forbidden=[(date(2025, 9, 9), date(2025, 9, 30))],
         )  # fmt: skip
-    clamped = runner.invoke(app, [*base, "2026-09-14"])
+    clamped = runner.invoke(app, [*base, "2025-09-08"])
     assert clamped.exit_code == 0, clamped.output
     (run_id,) = run_ids(runs)
-    assert read_manifest(RunLayout(runs), run_id)["sealed_opened"] is False
+    manifest = read_manifest(RunLayout(runs), run_id)
+    assert (manifest["sealed_opened"], manifest["params"]["purpose"]) == (False, "evaluation")
 
-    no_reason = runner.invoke(app, [*base, "2026-09-15", "--open-sealed", "--by", "tester"])
+    no_reason = runner.invoke(app, [*base, "2025-09-09", "--open-sealed", "--by", "tester"])
     assert no_reason.exit_code == 1
     assert "needs who (--by) and why (--reason)" in flat(no_reason.output)
-    opened = [*base, "2026-09-15", "--open-sealed", "--by", "tester", "--reason", "frozen"]
+    reference = ["backtest", "run", "reference_fixed_time", "--from", "2025-09-09", "--to"]
+    not_research = runner.invoke(
+        app, [*reference, "2025-09-09", "--open-sealed", "--by", "tester", "--reason", "x"]
+    )
+    assert not_research.exit_code == 1
+    assert "opened only for research strategies" in flat(not_research.output)
+    opened = [*base, "2025-09-09", "--open-sealed", "--by", "tester", "--reason", "frozen"]
     first_open = runner.invoke(app, opened)
     assert first_open.exit_code == 0, first_open.output
     again = runner.invoke(app, opened)
@@ -176,8 +203,9 @@ def test_sealed_period_is_refused_then_opened_once_and_journalled(
     with TrialLedger(ledger_path(data)) as ledger:
         (opening,) = ledger.sealed_openings()
         trials = ledger.list_trials()
+        assert ledger.parity_accesses() == []
     assert (opening.strategy, opening.opened_by, opening.reason) == (
-        "reference_fixed_time",
+        "trend_pullback",
         "tester",
         "frozen",
     )
@@ -207,7 +235,7 @@ def test_warmup_is_loaded_by_bar_count(tmp_path: Path) -> None:
     with pytest.raises(SealedPeriodError):  # warm-up history may not come from it either
         load_market(
             layout, "XAUUSD", **common, bar_spread_extra_points=2,
-            warmup_bars={Timeframe.H1: 30}, warmup_before=date(2026, 9, 13), sealed=(thu, thu),
+            warmup_bars={Timeframe.H1: 30}, warmup_before=date(2026, 9, 13), forbidden=[(thu, thu)],
         )  # fmt: skip
 
 

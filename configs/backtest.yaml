@@ -20,12 +20,18 @@ fixed_volume_lots: 0.10
 warmup_days: 10              # calendar days of bars loaded before --from
 
 # Sealed final-test period (owner decision D1, 2026-10-10; docs/VALIDATION_PROTOCOL.md).
-# Research backtests refuse to read any data file dated inside it (warm-up and the extra end
-# day included). The only way in is `aurum backtest run ... --open-sealed --by NAME --reason
-# TEXT`, allowed once per strategy and variant, for a strategy with an approved spec. It is
-# journalled in the trial ledger before any data is read. `reference` (the no-edge simulator
-# check, never selected) is exempt: its MT5 parity window 2026-09-14..10-08 lies inside.
+# No backtest reads data dated inside it: the loader refuses those files before reading
+# (warm-up and the extra end day included). Two journalled ways in, nothing else:
+# - research: `aurum backtest run ... --open-sealed --by NAME --reason TEXT`, once per strategy
+#   and variant, for a frozen candidate with an approved spec;
+# - parity: `aurum backtest run reference_fixed_time ... --parity --risk fixed --latency-ms 0
+#   --slippage-points 0`, only for the strategy, variant and window below (the MT5 Strategy
+#   Tester comparison, docs/strategies/reference_fixed_time.md), with no warm-up outside it.
 sealed_period:
   first: 2025-10-01
   last: 2026-10-08
-  exempt_families: [reference]
+  parity_exemption:
+    strategy: reference_fixed_time
+    variant: m5
+    first: 2026-09-14
+    last: 2026-10-08
