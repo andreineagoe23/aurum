@@ -16,7 +16,7 @@ from aurum.core.models import (
 )
 from aurum.data.market_hours import MarketHours
 from aurum.risk.base import RiskContext
-from aurum.risk.policy import PolicyRiskEngine, losing_streak, size_volume
+from aurum.risk.policy import PolicyRiskEngine, losing_streak, open_risk, size_volume
 from aurum.sessions import TradingCalendar
 from aurum.sessions.news import NewsBlackout
 from aurum.settings import AppConfig
@@ -267,6 +267,91 @@ def test_weekly_loss_limit(engine: PolicyRiskEngine, calendar: TradingCalendar) 
     why = rejected(engine, ctx(calendar, deals=week, account=acct))
     assert "weekly loss 250.90 >= limit 250.00 (2.5%)" in why
     assert "daily loss" not in why  # it was yesterday
+
+
+def test_new_trade_must_fit_the_remaining_budget(
+    engine: PolicyRiskEngine, calendar: TradingCalendar
+) -> None:
+    # Each case: new trade risk 20.38 (0.04 lots, see the sizing test).
+    # Today -90.00 net: start balance 10,000, limit 100.00, remaining 10.00.
+    today = trade(1, at("06:10"), at("06:20"), -89.10)
+    why = rejected(engine, ctx(calendar, deals=today, account=account(9_910.0)))
+    assert (
+        "daily budget: limit 100.00 (1.0%) - loss to date 90.00 - open risk 0.00 = "
+        "remaining 10.00 < new trade risk 20.38"
+    ) in why
+    # Today -70.00: remaining 30.00 covers it.
+    smaller = trade(1, at("06:10"), at("06:20"), -69.10)
+    assert engine.evaluate(
+        signal(), ctx(calendar, deals=smaller, account=account(9_930.0))
+    ).approved
+    # Monday -240.00: weekly limit 250.00, remaining 10.00; today is untouched.
+    monday = at("13:00") - timedelta(days=1)
+    week = trade(1, monday, monday + timedelta(minutes=5), -239.10)
+    why = rejected(engine, ctx(calendar, deals=week, account=account(9_760.0)))
+    assert "weekly budget" in why
+    assert "remaining 10.00 < new trade risk 20.38" in why
+    assert "daily" not in why
+
+
+def test_open_risk_is_the_further_loss_to_each_stop() -> None:
+    quote = Tick(symbol="XAUUSD", time=NOW, bid=2000.00, ask=2000.10)
+
+    def pos(side: Side, stop: float | None, volume: float = 0.2) -> PositionState:
+        return PositionState(
+            position_id=9,
+            symbol="XAUUSD",
+            side=side,
+            volume=volume,
+            open_price=2000.0,
+            open_time=NOW,
+            stop_loss=stop,
+        )
+
+    def risk(*positions: PositionState, q: Tick | None = quote) -> tuple[float | None, list[str]]:
+        return open_risk(
+            positions,
+            q,
+            now=NOW,
+            stale_after_seconds=10,
+            spec=spec(),
+            commission_per_lot_side=2.25,
+            stop_slippage_points=5,
+        )
+
+    # BUY exits at the bid: 0.2 x (10.00 x 100 + 2.25 + 5 points x 1.00) = 201.45
+    assert risk(pos(Side.BUY, 1990.0))[0] == pytest.approx(201.45)
+    # SELL exits at the ask: 0.1 x (0.90 x 100 + 2.25 + 5.00) = 9.725
+    assert risk(pos(Side.SELL, 2001.0, 0.1))[0] == pytest.approx(9.725)
+    # A stop already past the price (locked-in profit) risks only the exit costs.
+    assert risk(pos(Side.BUY, 2001.0))[0] == pytest.approx(0.2 * (2.25 + 5.0))
+    # Unknown -> fail closed.
+    assert risk(pos(Side.BUY, None)) == (
+        None,
+        ["open risk unknown: position 9 has no stop (incident)"],
+    )
+    stale = quote.model_copy(update={"time": NOW - timedelta(seconds=30)})
+    assert risk(pos(Side.BUY, 1990.0), q=stale) == (None, ["open risk unknown: stale quote"])
+    assert risk(pos(Side.BUY, 1990.0), q=None) == (None, ["open risk unknown: no quote"])
+    assert risk(q=None) == (0.0, [])  # no positions, nothing at risk
+
+
+def test_open_risk_counts_against_the_budget(
+    engine: PolicyRiskEngine, calendar: TradingCalendar
+) -> None:
+    held = PositionState(
+        position_id=9,
+        symbol="XAUUSD",
+        side=Side.BUY,
+        volume=0.2,
+        open_price=2000.0,
+        open_time=NOW,
+        stop_loss=1990.0,
+    )
+    why = rejected(engine, ctx(calendar, positions=(held,)))
+    assert "open risk 201.45 = remaining -101.45" in why
+    unstopped = held.model_copy(update={"stop_loss": None})
+    assert "has no stop (incident)" in rejected(engine, ctx(calendar, positions=(unstopped,)))
 
 
 def test_consecutive_losses_lock_the_rest_of_the_session(

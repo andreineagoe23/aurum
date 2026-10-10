@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 
+import pytest
+
 from aurum.backtest.broker import SimBroker
 from aurum.backtest.market import HistoricalMarket
 from aurum.core.clock import ManualClock
@@ -95,6 +97,7 @@ def rig(
     plans: dict,  # type: ignore[type-arg]
     *,
     ticks: list[TickRow] | None = None,
+    m1: list[BarRow] | None = None,
     store: IntentStore | None = None,
     kill: KillSwitch | None = None,
     max_age: timedelta = timedelta(seconds=60),
@@ -103,7 +106,7 @@ def rig(
     mkt = (
         market(ticks={DAY: ticks}, higher=higher)
         if ticks
-        else market(m1=flat_m1("05:00", "20:59"), higher=higher)
+        else market(m1=m1 or flat_m1("05:00", "20:59"), higher=higher)
     )
     inner, clock = sim(mkt, start="05:00", market_hours=MarketHours(cfg.data.market))
     broker = FaultyBroker(inner)
@@ -279,6 +282,24 @@ def test_kill_switch_flattens_and_blocks_until_cleared(
 
 
 # ------------------------------------------------------------------ limits cannot be bypassed
+
+
+def test_a_trade_that_would_overrun_the_daily_limit_is_rejected(app_config: AppConfig) -> None:
+    """0.9% lost, then a signal: 0.9% + its 0.2% risk could end the day past 1%, so it is
+    rejected even though the loss so far is under the limit (owner decision 2026-10-10)."""
+    gap = flat_m1("05:00", "08:04") + flat_m1("08:05", "20:59", price=1955.0)
+    plans = {at("08:00"): buy(), at("12:05"): Plan(Side.BUY, 1945.0)}
+    r = rig(app_config, plans, m1=gap)
+    r.step("08:00")  # 0.02 lots, stop 1990 (~20 at risk); at 08:05 it gaps 45 through the stop
+    r.step("12:05")  # afternoon window: no losing-streak lockout, 1 trade so far
+    (trade,) = r.sim.trades
+    assert -(trade.profit + trade.commission) == pytest.approx(90.28)  # 0.90% of 10,000
+    assert r.broker.sends == 1
+    (why,) = r.events(JournalEvent.RISK_REJECTED)
+    assert (
+        "daily budget: limit 100.00 (1.0%) - loss to date 90.28 - open risk 0.00 = "
+        "remaining 9.72 < new trade risk 20.39"
+    ) in why
 
 
 def test_a_strategy_signalling_all_day_cannot_exceed_the_limits(app_config: AppConfig) -> None:

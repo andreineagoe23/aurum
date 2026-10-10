@@ -10,9 +10,18 @@ A signal is approved only if all of these hold at decision time ``now``:
   known: an uncalibrated cap or a missing ATR rejects);
 * no Aurum position or pending order (one position at a time);
 * fewer than ``max_trades_per_day`` entries today (London trading date);
-* today's and this week's loss below ``daily/weekly_loss_limit_pct`` of the balance at the
-  start of the day/week. Loss = closed P&L incl. commission + open P&L of Aurum's own trades;
-  the start balance is the current balance minus Aurum's closed P&L since then;
+* the new trade's risk fits what is left of the daily and of the weekly loss budget
+  (prospective, owner decision 2026-10-10)::
+
+      limit         = daily/weekly_loss_limit_pct x balance at the start of the day/week
+      loss to date  = -(Aurum's closed P&L incl. commission + open P&L of Aurum's positions)
+      open risk     = sum over Aurum's positions of the further loss if each stopped out now
+                      (``open_risk``)
+      remaining     = limit - loss to date - open risk
+      approve only if new trade risk (the sizing below) <= remaining
+
+  The start balance is the current balance minus Aurum's closed P&L since then. A loss to date
+  at or above the limit is reported as such;
 * fewer than ``consecutive_loss_cooldown`` losing trades in a row within the current session
   window (the lockout lasts for the rest of that window);
 * the stop is beyond the reference price (the signal's entry price, else the executable side
@@ -40,7 +49,7 @@ from collections.abc import Sequence
 from datetime import datetime
 
 from aurum.core.enums import DealEntry
-from aurum.core.models import DealRecord, RiskDecision, Signal, SymbolSpec
+from aurum.core.models import DealRecord, PositionState, RiskDecision, Signal, SymbolSpec, Tick
 from aurum.risk.base import RiskContext
 from aurum.sessions.news import NewsBlackout
 from aurum.settings import RiskConfig
@@ -73,6 +82,48 @@ def size_volume(
     while steps > 0 and round(steps * step, decimals) * per_lot > budget:
         steps -= 1  # float rounding must never push the risk above the budget
     return round(max(steps, 0) * step, decimals), per_lot
+
+
+def open_risk(
+    positions: Sequence[PositionState],
+    quote: Tick | None,
+    *,
+    now: datetime,
+    stale_after_seconds: float,
+    spec: SymbolSpec,
+    commission_per_lot_side: float,
+    stop_slippage_points: float,
+) -> tuple[float | None, list[str]]:
+    """Further loss (money) if every position stopped out now, beyond its open P&L.
+
+    Per position: ``volume x (d x value per price unit per lot + exit commission per lot +
+    stop slippage x point x value)``, with ``d = max(0, (exit price - stop) x side sign)`` and
+    the exit price the bid for a BUY, the ask for a SELL. Entry commission is already booked in
+    the deal history. Returns ``(None, problems)`` when it can't be known: a position without a
+    stop (an incident) or no fresh quote. Callers must then refuse new risk.
+    """
+    if not positions:
+        return 0.0, []
+    problems = [
+        f"open risk unknown: position {p.position_id} has no stop (incident)"
+        for p in positions
+        if p.stop_loss is None
+    ]
+    if quote is None:
+        problems.append("open risk unknown: no quote")
+    elif (now - quote.time).total_seconds() > stale_after_seconds:
+        problems.append("open risk unknown: stale quote")
+    if problems:
+        return None, problems
+    assert quote is not None
+    value = spec.money_per_price_unit_per_lot
+    slippage = spec.points_to_price(stop_slippage_points) * value
+    total = 0.0
+    for p in positions:
+        assert p.stop_loss is not None
+        d = max(0.0, (quote.exit_price_for(p.side) - p.stop_loss) * p.side.sign)
+        total += p.volume * (d * value + commission_per_lot_side + slippage)
+    return total, []
 
 
 def _net(deals: Sequence[DealRecord]) -> float:
@@ -133,10 +184,9 @@ class PolicyRiskEngine:
                     f"{ctx.m15_atr:.2f}"
                 )
 
-        # --- exposure and account limits
+        # --- exposure
         if ctx.positions or ctx.orders:
             reasons.append("one position at a time: Aurum already has exposure")
-        reasons.extend(self._limits(ctx))
 
         # --- stop and size
         reference = signal.entry_price
@@ -170,6 +220,10 @@ class PolicyRiskEngine:
                         f"margin {margin:.2f} > free margin {ctx.account.margin_free:.2f}"
                     )
 
+        # --- account limits (after sizing: the loss budget must cover the new trade's risk)
+        new_risk = lots * cost_per_lot if lots >= ctx.spec.volume_min - 1e-12 else None
+        reasons.extend(self._limits(ctx, new_risk))
+
         if reasons:
             return RiskDecision(
                 decision_id=f"rd-{signal.key}",
@@ -195,10 +249,20 @@ class PolicyRiskEngine:
             ),
         )
 
-    def _limits(self, ctx: RiskContext) -> list[str]:
+    def _limits(self, ctx: RiskContext, new_risk: float | None) -> list[str]:
+        """Loss budgets, trades per day and the losing streak. ``new_risk`` is the sized
+        trade's risk (money), or None when sizing already failed."""
         cfg = self._cfg
-        reasons = []
         open_pnl = sum(p.unrealized_pnl for p in ctx.positions)
+        at_risk, reasons = open_risk(
+            ctx.positions,
+            ctx.quote,
+            now=ctx.now,
+            stale_after_seconds=cfg.stale_quote_seconds,
+            spec=ctx.spec,
+            commission_per_lot_side=self._commission,
+            stop_slippage_points=self._slippage,
+        )
         for label, start, pct in (
             ("daily", ctx.day_start, cfg.daily_loss_limit_pct),
             ("weekly", ctx.week_start, cfg.weekly_loss_limit_pct),
@@ -212,6 +276,14 @@ class PolicyRiskEngine:
             limit = start_balance * pct / 100
             if loss >= limit:
                 reasons.append(f"{label} loss {loss:.2f} >= limit {limit:.2f} ({pct}%)")
+            elif at_risk is not None and new_risk is not None:
+                remaining = limit - loss - at_risk
+                if new_risk > remaining + 1e-9:
+                    reasons.append(
+                        f"{label} budget: limit {limit:.2f} ({pct}%) - loss to date {loss:.2f} "
+                        f"- open risk {at_risk:.2f} = remaining {remaining:.2f} "
+                        f"< new trade risk {new_risk:.2f}"
+                    )
         if ctx.day_start is not None:
             entries = sum(
                 1 for d in ctx.deals if d.entry is DealEntry.IN and d.time >= ctx.day_start
