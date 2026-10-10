@@ -156,6 +156,63 @@ _Last updated: 2026-10-10._
      runs, and failures keep their stage and error. Retries are explicit and linked.
      `aurum backtest grid` runs only the declared 27 points per variant. All of this is
      tested on synthetic data only.
+   **Third review (2026-10-10): evaluation-integrity blockers, fixed. No trial run, no
+   development P&L, no sealed opening, no parity on real data, ledger untouched:**
+   - **Frozen batch identity.** `pipeline.prepare` resolves the evaluation context before any
+     attempt:
+     - code: the `aurum` source tree by content, installed distributions, Python;
+     - the spec document's hash;
+     - the config hash, plus the effective costs, risk and account values;
+     - the symbol snapshot, name and content;
+     - input data: a hash over every planned file, warm-up included. The loader now plans
+       files before reading any (`plan_market`, `read_market`);
+     - the declared grid and the dates.
+
+     Every attempt stores its context. A batch is frozen to its first run's context
+     (`grid_batches`, append-only). A grid run, an attempt or a retry under another context is
+     refused before any attempt, naming the changed parts. A grid request must name its own
+     batch id and a declared point. Code identity is the source content, not the git sha: an
+     uncommitted edit breaks a batch, a docs-only commit does not.
+   - **Post-trial recovery.** The order is now: stage the run files
+     (`reports/runs/.staging/<id>/`), then record the trial and the success outcome in one
+     transaction, then publish (rename).
+     - A unique index allows one trial per batch point.
+     - A point with a trial is never evaluated again, whatever its attempt rows say. That
+       includes a trial left next to an unfinished attempt by the old, non-atomic order.
+     - `check_retry` refuses an attempt whose point has a trial.
+     - A failed publish raises `ArtifactsPendingError` and the trial stands.
+       `aurum backtest recover` publishes staged files after checking their hashes against
+       the trial. It runs nothing and writes no ledger row.
+   - **Empty periods.** `first ≤ last` is checked in `prepare`, `resolve_access`, `run_grid`
+     and `start_attempt`, before any journal, opening or attempt row.
+   - **Test evidence (synthetic only):**
+     - `test_a_grid_batch_is_frozen_to_its_evaluation_context`: changing each of code, spec,
+       costs, risk, symbol snapshot, a warm-up data file or the declared grid is refused with
+       the changed part named and no new attempt. Other dates under the same batch id are
+       refused. Restored, the batch completes (27 trials, 28 attempts, 1 batch).
+     - `test_recorded_trials_are_recovered_never_evaluated_again`: four injected failures.
+       - Staging-write failure: failed at `write`, no trial.
+       - Publish failure: succeeded, files staged.
+       - Success-outcome recording failure inside the transaction: rolled back, failed at
+         `record`, no trial.
+       - Crash after the trial was persisted, with no outcome: unfinished, with a trial.
+
+       Resuming reconciles the two points that have trials and does not rerun them.
+       `recover` publishes both. `--retry-failed` reruns only the two points with no trial,
+       never the unfinished one. In the end there are 27 trials and 27 published runs, and
+       every point is simulated once, except the two retried points (twice).
+     - `test_an_empty_period_leaves_no_ledger_trace`: a reversed range on run, `--open-sealed`,
+       `--parity` and grid gives exit 1 and zero rows in every ledger table. Before this fix,
+       the parity path journalled such a range.
+     - The retry test also checks a refusal under another context, and a refusal when the
+       point already has a trial.
+     - Re-introducing each bug fails a test: no range check, non-atomic trial + outcome,
+       "done" taken from attempt status, no data identity, retries ignoring context or
+       trials, no batch freeze.
+   - Ledger schema: two nullable columns on `attempts` (added in place if the table predates
+     them), plus `grid_batches` and the unique index. The real ledger (`C:urum-data`,
+     checked read-only) has only `trials` (10 rows) and no attempts, so no old attempt is
+     affected. Nothing was deleted or rewritten.
    **Claude stops for review again before running any of the 54 trials.**
 8. **Evaluate only the registered thresholds**; never open the sealed period.
 9. **Phase 3b replay only when triggered**; link the worst- and best-case runs.
@@ -227,7 +284,7 @@ Nothing in the spec changes after step 7 starts. If every trial fails, the resul
     deliberately;
   - never work around this by editing file timestamps.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
-- Test suite: 393 tests (384 passed, 9 skipped on the VM: 6 live-market checks with the market
-  closed, 2 demo-order tests, 1 non-Windows test), ~65–90 s with coverage, 92.07% combined on
-  the VM (2026-10-10). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 382 passed,
+- Test suite: 410 tests (401 passed, 9 skipped on the VM: 6 live-market checks with the market
+  closed, 2 demo-order tests, 1 non-Windows test), ~2 min with coverage, 92.16% combined on
+  the VM (2026-10-10, after the third Phase 5 review). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 382 passed,
   11 skipped, 91.97% (item 6).
