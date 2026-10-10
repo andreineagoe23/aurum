@@ -40,10 +40,13 @@ _Last updated: 2026-10-10._
    `intrabar_rule = cancel_bar`, `worst_case = true`, kept over any same-bar exit; not reached
    → cancelled. Freeze level only if still pending. Ticks keep the exact order. Summary key
    `intrabar_cancel_bar`. Golden scenario `cancel_and_entry_in_one_bar` (14th).
-4. **Phase 3b (Dukascopy) trigger** — record in ADR-0008/0009 and enforce in the Phase 5 report:
-   open Phase 3b if a candidate has **> 1%** of trades decided by the worst-case rule, **or** if
-   flipping every flagged trade to its best case changes the **sign of net P&L or the pass/fail
-   verdict**.
+4. ~~**Phase 3b (Dukascopy) trigger**~~ — **done** as a contract (ADR-0008 amendment,
+   ADR-0009 §9, `docs/VALIDATION_PROTOCOL.md` "Intra-bar sensitivity"). Rule in
+   `aurum.validation.phase3b.decide_phase_3b`: required if flagged ÷ total closed trades
+   **> 1%** (strict) or sign(net worst) ≠ sign(net best) (cents, 0.00 its own sign) or the
+   verdicts differ. Best case = a second replay with `intrabar_policy: best`, linked in the
+   ledger, never edited trades; missing with flagged trades → fail closed; no override. The
+   best-case policy in `SimBroker` and the ledger link are built with the Phase 5 runner.
 5. **Stop-size cap in every strategy spec.** At 0.25% of $10k ($25 budget) a stop needs
    ≲ $20–25 at 0.01 lot or the risk engine rejects every trade (all 1,524 14:30 SELLs of the
    reference strategy were rejected: 3,000 points ≈ $30). Add the cap to
@@ -76,6 +79,8 @@ _Last updated: 2026-10-10._
   stop-size cap. The reviewer offered to draft the trend-pullback spec — ask the user.
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
+- Report **intra-bar sensitivity** per candidate (worst + best replay, `phase_3b_required`);
+  see `docs/VALIDATION_PROTOCOL.md`. Phase 3b required → not passed.
 - Judge M15-direct vs M5-trigger on **net expectancy and drawdown after costs**, not win rate.
 - **Null baseline**: `reference_fixed_time` with the policy risk engine, 2020-11-12 … 2026-10-08,
   run `…233326910002Z_reference_fixed_time_m5_ae3d92`: 1,520 trades, **−$381.76**, max DD 5.4%.

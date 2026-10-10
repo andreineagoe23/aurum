@@ -16,6 +16,23 @@ Rules from MASTER_PROMPT Phases 5-6 and section 4 rules 9-11. Implementation det
 - Reports must state the total trial count. The count feeds the Deflated Sharpe Ratio.
 - TODO(Phase 6): ledger schema extensions for fold-level results and report linkage.
 
+## Intra-bar sensitivity and the Phase 3b trigger (Phase 5 report contract)
+
+Owner decision 2026-10-10; ADR-0008 amendment, ADR-0009 §9; rule in
+`aurum.validation.phase3b`.
+
+- Every reported candidate runs under `intrabar_policy: worst` (the verdict run) and is
+  replayed under `intrabar_policy: best` on the same data, parameters, costs and risk
+  configuration. The best case is a separate deterministic replay, never edited trades. Both
+  runs go in the trial ledger, linked to each other.
+- The report shows: worst-case count and share (÷ total closed trades), net P&L worst and best
+  and their signs, both verdicts, and `phase_3b_required` (`Phase3bDecision.summary()`).
+- `phase_3b_required` = share > 1% (strict) **or** sign(net worst) ≠ sign(net best) (rounded
+  to cents, 0.00 its own sign) **or** verdict worst ≠ verdict best.
+- Phase 3b required → the candidate has not passed. No manual override.
+- Flagged trades but no best-case replay → the report fails closed
+  (`BestCaseReplayMissingError`). With no flagged trade the worst-case run is also the best.
+
 ## Sealed final test
 
 - The newest substantial period is sealed. Its date range is stored in config.

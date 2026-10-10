@@ -40,7 +40,7 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed rows |
 | `monitoring` | `logging` (structlog JSON, secret redaction), `doctor`, `watchdog` (heartbeat → kill switch) |
 | `apps` | `collector` (live ticks, Windows); `shadow`, `trader` are Phase 7/8 placeholders |
-| `validation` | Phase 6 placeholder (walk-forward, DSR) |
+| `validation` | `phase3b` (Phase 3b trigger on a candidate's worst/best intra-bar runs, ADR-0009 §9); walk-forward and DSR are Phase 6 |
 | `settings.py` | `.env` + `configs/*.yaml` → validated `Settings`; safety caps live in validators |
 | `cli.py` | `aurum` Typer app (below) |
 

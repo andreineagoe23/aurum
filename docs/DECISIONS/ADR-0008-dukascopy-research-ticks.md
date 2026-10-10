@@ -58,3 +58,25 @@ Approved in principle, **deferred**:
    a. Dukascopy's terms are confirmed to allow personal research use;
    b. the validation in proposal item 4 passes against Fusion `exact` days.
 3. Until then nothing in this ADR is implemented and no Dukascopy data is downloaded.
+
+## Amendment (owner, 2026-10-10): what "material" means
+
+"Material" in Decision 2 is decided per Phase 5 candidate by an exact rule
+(`aurum.validation.phase3b.decide_phase_3b`):
+
+```text
+phase_3b_required = worst_case_share > 1%
+                 or sign(net_worst) != sign(net_best)
+                 or verdict_worst != verdict_best
+```
+
+- `worst_case_share` = trades flagged by an intra-bar rule (ADR-0009 §5) ÷ **total closed
+  trades** of the worst-case run. Strictly greater: exactly 1.00% does not trigger, 1.01% does.
+- `net_worst`/`net_best`: net P&L of the worst-case run and of its best-case **replay**
+  (ADR-0009, "Best-case replay"), rounded to cents; 0.00 is its own sign, separate from
+  positive and negative.
+- `verdict_*`: the candidate gate's pass/fail on each run.
+
+If any condition holds, Phase 3b is required for that candidate and it has **not passed**;
+no manual override can declare it passed. The conditions in Decision 2 (licence, validation
+against `exact` days) still apply before any Dukascopy data is used.

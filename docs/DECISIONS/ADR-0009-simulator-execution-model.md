@@ -52,6 +52,28 @@ from 2026-06-26 (ADR-0007); before that, back to 2020-11-12, only M1 bars exist.
 8. **Cutoffs.** Force-flat at `min(force_flat_at, market close − market_close_buffer_minutes)`,
    with the market close taken from `configs/data.yaml` (daily break or early close). Closed
    dates are not traded.
+9. **Best-case replay and the Phase 3b trigger** (owner, 2026-10-10). Phase 5 reports every
+   candidate under two intra-bar policies, `intrabar_policy: worst | best`. `worst` is the
+   model above (a candidate passes only on its worst-case verdict). `best` is a **second
+   deterministic replay** on the same data, parameters, costs and risk configuration, with only
+   the policy changed: target first in `sl_tp_same_bar`, the exit level allowed before the entry in
+   `entry_bar`, the close or target before the stop in `close_bar`, the cancel succeeding in
+   `cancel_bar` (the trade never exists). It is never made by editing the worst-case trades,
+   because a different ordering can remove a trade, move its exit, or change which later
+   signals the risk engine accepts. The two runs are linked in the trial ledger. Then
+   (`aurum.validation.phase3b`):
+
+   ```text
+   phase_3b_required = worst_case_share > 1%
+                    or sign(net_worst) != sign(net_best)
+                    or verdict_worst != verdict_best
+   ```
+
+   with `worst_case_share` = flagged trades ÷ total closed trades of the worst-case run
+   (strictly greater than 1%), net P&L rounded to cents (0.00 is its own sign) and `verdict` the
+   candidate gate's pass/fail. Phase 3b required means the candidate has not passed; there is
+   no override. With flagged trades and no best-case replay the report fails closed. The
+   best-case policy itself is built with the Phase 5 runner, not before.
 
 ## Consequences
 
