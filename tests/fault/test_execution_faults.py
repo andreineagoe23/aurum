@@ -216,7 +216,9 @@ def test_restart_with_open_position_keeps_its_timeout(
     assert engine.signal_for(pos.idempotency_key) is not None
     r.step("08:15")
     assert len(r.sim.positions()) == 1
-    r.step("08:30")
+    # Signal-to-exit (D6 b): the deadline is Signal.time + 30 min = 08:30. Down past it, the
+    # first step after it closes the position; the clock never restarts.
+    r.step("08:45")
     assert r.sim.positions() == []
     assert engine.exit_reasons == {pos.position_id: ExitReason.TIMEOUT}
 

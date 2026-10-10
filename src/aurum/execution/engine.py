@@ -15,7 +15,10 @@ Per step, at ``now = view.now``:
 4. If the phase says flat (CLOSED, PRE_SESSION, FORCE_FLAT): the same, exit reason FORCE_FLAT.
 5. Outside OPEN: cancel owned pending entry orders.
 6. For each owned position: close it when its signal's ``max_hold`` has elapsed (TIMEOUT) or
-   the strategy reports the setup invalid (INVALIDATION).
+   the strategy reports the setup invalid (INVALIDATION). ``max_hold`` is a signal-to-exit
+   timeout: the deadline is ``Signal.time + max_hold`` (the decision instant, not the fill),
+   rebuilt from the persisted signal after a restart; a deadline that passed while the engine
+   was down closes the position at the first step, never restarting the clock.
 7. In OPEN, at a close of the strategy's decision timeframe, unless an order outcome is still
    unresolved: ask the strategy for a Signal, the risk engine for a decision, and submit the
    resulting ``OrderIntent`` through the ``OrderManager`` (recorded, age-limited, idempotent).
