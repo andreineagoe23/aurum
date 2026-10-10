@@ -287,6 +287,8 @@ def test_parity_cli_end_to_end(env: tuple[Path, Path], tmp_path: Path) -> None:
     only_total = runner.invoke(app, ["backtest", "parity", run_id, str(drift)])
     assert only_total.exit_code == 1
     assert "total net P&L" in only_total.output
+    flat = " ".join(only_total.output.split())
+    assert "difference -0.04, absolute difference 0.04 > 0.02" in flat, flat
     assert "exit_price" not in only_total.output
 
     off = csv_from_run(tmp_path / "off.csv", trades, nudge_points=5)

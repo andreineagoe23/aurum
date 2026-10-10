@@ -81,9 +81,11 @@ accept it as an explained difference.
 
 The live tick collector runs in the main terminal; don't stop it. Run the tester in a **second
 MT5 installed in portable mode** in its own folder (`terminal64.exe /portable`), which has its
-own data directory: "Data Folder" below is then the portable install's folder. The EA writes
-its CSV with `FILE_COMMON`; check where it lands with a portable install (expected:
-`%APPDATA%\MetaQuotes\Terminal\Common\Files`, else under the portable folder) and send that path.
+own data directory: "Data Folder" below is then the portable install's folder. The EA uses
+`FILE_COMMON`, so the CSV normally appears under `%APPDATA%\MetaQuotes\Terminal\Common\Files`,
+including when the terminal runs in portable mode. To verify the exact path on this VM, use
+MetaEditor's *File > Open Common Data Folder* or print
+`TerminalInfoString(TERMINAL_COMMONDATA_PATH)`.
 
 1. **Install the EA.** In MT5, choose *File > Open Data Folder*. Copy
    `C:\code\aurum\mql5\AurumReference.mq5` into `MQL5\Experts\Aurum\` (create the `Aurum` folder).

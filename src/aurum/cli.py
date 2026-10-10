@@ -864,10 +864,12 @@ def backtest_parity(
             f"[red]trade count: aurum {report.aurum_trades} vs tester {report.tester_trades}[/red]"
         )
     if not report.cumulative_net_pnl_within_tolerance:
+        difference = report.total_net_pnl_difference
         console.print(
             f"[red]total net P&L: aurum {report.total_net_pnl_aurum:.2f} vs tester "
-            f"{report.total_net_pnl_tester:.2f} ({report.total_net_pnl_difference:+.2f} > "
-            f"{report.tolerance.cumulative_money:.2f})[/red]"
+            f"{report.total_net_pnl_tester:.2f}; difference {difference:+.2f}, "
+            f"absolute difference {abs(difference):.2f} > "
+            f"{report.tolerance.cumulative_money:.2f}[/red]"
         )
     console.print(f"details: {runs.parity(run_id)}")
     if not report.ok:
