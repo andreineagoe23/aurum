@@ -21,16 +21,12 @@ _Last updated: 2026-10-10._
 
 ### A. Before Phase 5 starts (reviewer decisions, 2026-10-10)
 
-1. **Prospective loss budget** (decision on Phase 4 known issue 4). Entry is allowed only if the
-   new trade's worst-case risk fits what is left:
-   `remaining = limit − realised loss − open risk`; require `new trade risk ≤ remaining`.
-   Compute risk exactly as sizing does (`risk/policy.py::size_volume`: stop distance × value +
-   round-trip commission + stop slippage). Apply to **daily 1%** and **weekly 2.5%**.
-   Without it, 0.9% lost + a 0.25% trade can end the day at 1.15%.
-   - Fault test: 0.9% already lost, then a signal → **rejected**.
-   - Update ADR-0010 and the risk section of `CLAUDE.md`.
-   - Open question to settle in code review, not by guessing: "open risk" of an open position
-     = distance from current price to its stop × value (+ exit commission). Ask if unclear.
+1. ~~**Prospective loss budget**~~ — **done** (c76a9d5, ADR-0010 amended).
+   `remaining = limit − loss to date − open risk` per daily and weekly limit; loss to date =
+   −(closed P&L + open P&L); open risk = further loss from the current exit price (bid for a
+   BUY, ask for a SELL) to each stop, plus exit commission and stop slippage; a stopless
+   position or a missing/stale quote rejects. Fault test
+   `test_a_trade_that_would_overrun_the_daily_limit_is_rejected`.
 2. **Parity check additions** (`backtest/parity.py`, `aurum backtest parity`). Keep tolerances
    (1 s fill time, 1 point price, same exit reason, $0.02 money). Add: trade count must match
    **exactly**; total net P&L within a small **cumulative** tolerance. Never loosen a tolerance
@@ -75,7 +71,10 @@ _Last updated: 2026-10-10._
 - Judge M15-direct vs M5-trigger on **net expectancy and drawdown after costs**, not win rate.
 - **Null baseline**: `reference_fixed_time` with the policy risk engine, 2020-11-12 … 2026-10-08,
   run `…233326910002Z_reference_fixed_time_m5_ae3d92`: 1,520 trades, **−$381.76**, max DD 5.4%.
-  This is what no edge looks like after costs; judge every candidate against it.
+  This is what no edge looks like after costs; judge every candidate against it. Rerun on
+  c76a9d5 (prospective budget) as `20261010T002425547831Z_reference_fixed_time_m5_3322ec`:
+  byte-identical trades (sha256 `447228f1…`). The budget never binds for this strategy (at
+  most one ~$20 trade a day, far from the $250 weekly limit).
 
 ## Environment facts
 

@@ -91,7 +91,8 @@ Its job is to tell the truth, not to make backtests look good.
 - Risk (Phase 4, ADR-0010): `PolicyRiskEngine` in every mode; size = floor(equity × risk% ÷
   (stop × value + 2 × commission + stop slippage), step), never rounded up to `volume_min`.
   Loss limits and streaks come from the broker's deal history (magic + "AU"), never local
-  state. News windows and FOMC dates live in risk.yaml; add each year's FOMC dates in time.
+  state. Limits are prospective: new trade risk ≤ limit − loss to date − open risk (open risk
+  from the current exit price to each stop, + exit commission + stop slippage; unknown → reject). News windows and FOMC dates live in risk.yaml; add each year's FOMC dates in time.
   `FixedVolumeRisk` is for the tester parity check only (`--risk fixed`).
 - Execution (ADR-0011): the engine sends only through `OrderManager` (intent recorded first,
   60 s age limit, lost reply = UNKNOWN, never resent); `reconcile` fixes the store and unsafe

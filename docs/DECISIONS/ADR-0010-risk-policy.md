@@ -33,6 +33,28 @@ keeps its broker-side stop and is not closed. Everything comes from the broker's
 (magic and "AU" key), so a restart cannot reset a limit. Manual trades and deposits are not
 Aurum's and are ignored.
 
+**Prospective loss budget** (owner decision 2026-10-10, amends the above). A new trade is
+approved only if its own worst-case risk fits what is left of each budget, checked separately
+for the daily and the weekly limit:
+
+```text
+loss to date = -(Aurum's closed P&L incl. commission + open P&L)      (as above)
+open risk    = Σ volume × (max(0, (exit price − stop) × side) × value
+                           + exit commission per lot + stop slippage × point × value)
+remaining    = limit − loss to date − open risk
+approve only if new trade risk ≤ remaining
+```
+
+New trade risk is the sizing figure (stop distance, round-trip commission, stop slippage) and
+stays in `RiskDecision.risk_amount`. Open risk uses the current executable exit price (bid for
+a BUY, ask for a SELL), so the move from entry to now, already in loss to date, is not counted
+twice; only the exit commission is added, the entry commission being booked. A position
+without a stop, or no fresh quote, makes open risk unknown and rejects new risk (fail closed).
+The rejection states limit, loss to date, open risk, remaining and new risk. Without this rule
+0.9% lost plus a 0.25% trade could end the day at 1.15%. With one position at a time, open
+risk is normally 0 when an entry is considered (any exposure already rejects); it is computed
+anyway for complete accounting and for multiple positions later.
+
 **Other gates, every one checked and every failure listed:**
 - the session phase allows entries;
 - at least `min_minutes_before_cutoff` (45) before the cutoff;
