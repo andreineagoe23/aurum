@@ -26,12 +26,19 @@ Owner decision 2026-10-10; ADR-0008 amendment, ADR-0009 §9; rule in
   configuration. The best case is a separate deterministic replay, never edited trades. Both
   runs go in the trial ledger, linked to each other.
 - The report shows: worst-case count and share (÷ total closed trades), net P&L worst and best
-  and their signs, both verdicts, and `phase_3b_required` (`Phase3bDecision.summary()`).
-- `phase_3b_required` = share > 1% (strict) **or** sign(net worst) ≠ sign(net best) (rounded
-  to cents, 0.00 its own sign) **or** verdict worst ≠ verdict best.
+  and their signs, both verdicts, `best_case_replay_required`, `best_run_reused` and
+  `phase_3b_required` (`Phase3bDecision.summary()`).
+- Net P&L is quantized to cents by `phase3b.to_cents` only: decimal `ROUND_HALF_UP` (half a
+  cent away from zero, ±0.005 → ±0.01; anything closer to zero → 0.00, never −0.00).
+  NaN or ±infinity is rejected when the run is recorded (`IntrabarRun`).
+- `phase_3b_required` = share > 1% (strict) **or** sign(net worst) ≠ sign(net best) (in
+  cents, 0.00 its own sign) **or** verdict worst ≠ verdict best.
 - Phase 3b required → the candidate has not passed. No manual override.
 - Flagged trades but no best-case replay → the report fails closed
-  (`BestCaseReplayMissingError`). With no flagged trade the worst-case run is also the best.
+  (`BestCaseReplayMissingError`). With no flagged trade the worst-case run is also the best,
+  and the summary says so: `best_case_replay_required: false`, `best_run_reused: true`. With a
+  supplied replay, `best_case_replay_required` = (worst-case run has flagged trades) and
+  `best_run_reused: false`.
 
 ## Sealed final test
 

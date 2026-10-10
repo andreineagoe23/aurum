@@ -17,9 +17,13 @@ Owner decision 2026-10-10 (ADR-0008, ADR-0009)::
 ``share_worst`` = flagged trades / total closed trades of the worst-case run. A candidate for
 which Phase 3b is required has not passed, whatever its verdicts; there is no override. With
 flagged trades and no best-case replay the decision refuses to be made (fail closed).
+
+Money is compared and reported in cents through ``to_cents`` only.
 """
 
+import math
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from enum import StrEnum
 from fractions import Fraction
 from typing import Any
@@ -27,7 +31,20 @@ from typing import Any
 PHASE_3B_SHARE = Fraction(1, 100)
 """Worst-case share above which Phase 3b is required (exactly 1% does not trigger)."""
 
-MONEY_DIGITS = 2
+CENT = Decimal("0.01")
+
+
+def to_cents(money: float) -> Decimal:
+    """``money`` quantized to cents, half a cent rounded away from zero (``ROUND_HALF_UP``).
+
+    The repository had no rounding mode of its own (elsewhere money goes through binary
+    ``round(x, 2)``, which turns 2.675 into 2.67 and 0.125 into 0.12), so the financial
+    reporting convention is used: ±0.005 -> ±0.01, anything closer to zero -> 0.00. The value
+    is read in its shortest decimal form (``str``), the number the run reported, not the binary
+    float's exact expansion. A zero result is always +0.00, never -0.00.
+    """
+    cents = Decimal(str(money)).quantize(CENT, rounding=ROUND_HALF_UP)
+    return cents.copy_abs() if cents.is_zero() else cents
 
 
 class IntrabarPolicy(StrEnum):
@@ -57,6 +74,8 @@ class IntrabarRun:
     """The candidate gate's verdict on this run."""
 
     def __post_init__(self) -> None:
+        if not math.isfinite(self.net_pnl):
+            raise ValueError(f"{self.run_id}: net_pnl {self.net_pnl!r} is not a finite amount")
         if not 0 <= self.worst_case_trades <= self.trades:
             raise ValueError(
                 f"{self.run_id}: worst_case_trades {self.worst_case_trades} not in 0..{self.trades}"
@@ -65,7 +84,7 @@ class IntrabarRun:
 
 def net_sign(net_pnl: float) -> int:
     """-1, 0 or +1 of the net P&L rounded to cents (0.00 is its own sign)."""
-    cents = round(net_pnl, MONEY_DIGITS)
+    cents = to_cents(net_pnl)
     return (cents > 0) - (cents < 0)
 
 
@@ -75,6 +94,20 @@ class Phase3bDecision:
     best: IntrabarRun
     """The best-case replay, or the worst-case run itself when no trade was flagged (then no
     assumption decided anything and both policies give the same run)."""
+    best_run_reused: bool = False
+    """True when ``best`` is the worst-case run itself, not a separate replay."""
+
+    def __post_init__(self) -> None:
+        if self.best_run_reused and (self.best is not self.worst or self.worst.worst_case_trades):
+            raise ValueError(
+                f"{self.worst.run_id}: the worst-case run stands in for the best case only when "
+                "it is the same run and has no flagged trade"
+            )
+
+    @property
+    def best_case_replay_required(self) -> bool:
+        """A separate best-case replay is needed exactly when the worst-case run flagged a trade."""
+        return self.worst.worst_case_trades > 0
 
     @property
     def worst_case_share(self) -> Fraction:
@@ -106,11 +139,13 @@ class Phase3bDecision:
         return {
             "worst_run_id": self.worst.run_id,
             "best_run_id": self.best.run_id,
+            "best_case_replay_required": self.best_case_replay_required,
+            "best_run_reused": self.best_run_reused,
             "trades": self.worst.trades,
             "worst_case_trades": self.worst.worst_case_trades,
             "worst_case_share": float(self.worst_case_share),
-            "net_pnl_worst": round(self.worst.net_pnl, MONEY_DIGITS),
-            "net_pnl_best": round(self.best.net_pnl, MONEY_DIGITS),
+            "net_pnl_worst": float(to_cents(self.worst.net_pnl)),
+            "net_pnl_best": float(to_cents(self.best.net_pnl)),
             "net_sign_worst": net_sign(self.worst.net_pnl),
             "net_sign_best": net_sign(self.best.net_pnl),
             "verdict_worst": "pass" if self.worst.passed else "fail",
@@ -133,7 +168,7 @@ def decide_phase_3b(worst: IntrabarRun, best: IntrabarRun | None) -> Phase3bDeci
                 f"{worst.run_id}: {worst.worst_case_trades} flagged trades and no best-case "
                 "replay; the candidate cannot be reported"
             )
-        return Phase3bDecision(worst, worst)
+        return Phase3bDecision(worst, worst, best_run_reused=True)
     if best.policy is not IntrabarPolicy.BEST:
         raise ValueError(f"{best.run_id} is a {best.policy}-case run, expected best")
     return Phase3bDecision(worst, best)
