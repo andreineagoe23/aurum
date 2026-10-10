@@ -210,10 +210,41 @@ _Last updated: 2026-10-10._
        "done" taken from attempt status, no data identity, retries ignoring context or
        trials, no batch freeze.
    - Ledger schema: two nullable columns on `attempts` (added in place if the table predates
-     them), plus `grid_batches` and the unique index. The real ledger (`C:urum-data`,
+     them), plus `grid_batches` and the unique index. The real ledger (`C:\aurum-data`,
      checked read-only) has only `trials` (10 rows) and no attempts, so no old attempt is
      affected. Nothing was deleted or rewritten.
-   **Claude stops for review again before running any of the 54 trials.**
+   **Approved to run (2026-10-10), then refused before any attempt.** The reviewer approved
+   the 54 trials on `f5b2744` (2020-11-12 … 2025-09-30, one grid process at a time).
+   - Pre-flight: clean worktree; only the collector running; ledger backup
+     `C:\aurum-data\ledger\backups\trials_20261010T1422Z_before_trend_pullback_dev_grid.sqlite`
+     (sha256 `0c0171ca…6329076`); no earlier batch to reconcile.
+   - The m15 grid was refused in `prepare` with "warm-up needs 504 completed H1 bars before
+     2020-11-12; only 0 in the store". There was no attempt, batch or row, and m5 was not
+     started. Evidence: `docs/strategies/evidence/trend_pullback_2026-10-10_warmup_preflight.md`.
+   **Amendment A1 (reviewer, option A, pre-results):**
+   - The evaluated trading period is 2020-12-15 … 2025-09-30, with 10,000 USD at 2020-12-15
+     and the training-only window from 2020-12-15. 2020-11-12 … 12-14 is warm-up only.
+   - OOS folds, rules, grid, costs, risk, thresholds and the warm-up requirement are
+     unchanged. No backfill.
+   - Recorded in spec section 16 and the change log.
+   **Pinned symbol snapshot** (reviewer condition, needed a code change):
+   - `backtest.yaml` `symbol_snapshot` is required: `20261010T000046Z.json`, sha256
+     `0426cf8c…be0c7ee`. Every backtest loads exactly that file (`specs.pinned_spec`) and
+     refuses it if it is missing or its bytes differ. The collector's newer daily snapshots
+     are ignored, so a batch no longer depends on finishing before 00:00 UTC.
+   - Snapshot file and hash are in the frozen context.
+   - Tests (synthetic):
+     - changing the pin is refused (`config_hash, symbol`);
+     - a tampered pinned file is refused before any attempt;
+     - a newer snapshot leaves the batch unchanged and lets it finish.
+   - Re-introducing "latest snapshot" or skipping the hash check fails the test.
+   **Claude stops for review of the snapshot pin before running any of the 54 trials.** Next,
+   once approved, run sequentially:
+   `uv run --no-sync aurum backtest grid trend_pullback --variant m15 --from 2020-12-15 --to
+   2025-09-30`, then the same with `--variant m5`. No automatic `--retry-failed`.
+   - Open point for later, not now: the null baseline in "Phase 5 conditions" covers
+     2020-11-12 … 2026-10-08. A like-for-like comparison would rerun it over 2020-12-15 …
+     2025-09-30. That is an extra evaluation and needs approval.
 8. **Evaluate only the registered thresholds**; never open the sealed period.
 9. **Phase 3b replay only when triggered**; link the worst- and best-case runs.
 10. **Select or reject the family**, only after all development and walk-forward evidence.
