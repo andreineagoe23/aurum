@@ -132,10 +132,8 @@ watchdog 98%, SimBroker 94%. All on **Windows (this VM)**. **Not run on the Mac*
    They have no timeout or invalidation.
 6. **Watchdog not schedulable yet.** The trader loops that write heartbeats come in Phase 7/8.
    Scheduling `aurum watchdog` now would raise MISSING alarms every trading day.
-7. **Cancel in a bar.** On bar-only days, since the `close_bar` fix, a cancel arriving inside an
-   M1 bar takes effect at that bar's open, before a pending entry that the bar would trigger
-   later. The order is unknowable on bars and the case isn't flagged. It's rare, and no
-   strategy uses pending orders yet; Phase 5 will flag it if a strategy does.
+7. **Cancel in a bar.** ~~On bar-only days a cancel arriving inside an M1 bar took effect at
+   that bar's open, unflagged.~~ Resolved 2026-10-10: see §10.
 
 ## 8. Open from Phase 3
 
@@ -155,3 +153,30 @@ watchdog 98%, SimBroker 94%. All on **Windows (this VM)**. **Not run on the Mac*
   (`docs/STRATEGY_SPEC_TEMPLATE.md`) before code, broad pre-declared parameter ranges, every
   trial in the ledger, and gross vs net cost attribution. Indicators needed: EMA, session
   VWAP, opening range, structure levels.
+
+## 10. Addendum (2026-10-10): cancel inside a bar
+
+Reviewer decision on issue 7, implemented in `SimBroker.cancel_order` (ADR-0009 §5). Before,
+on bar-only days, the simulator processed the market only up to the open of the bar the cancel
+arrived in and then deleted the order, so an entry the bar reached later was silently
+cancelled. Now, before deleting:
+
+| Case | Result | Flag |
+|---|---|---|
+| Ticks | trigger on a quote before the cancel's quote → filled; otherwise cancelled | none |
+| Bars, the bar opens at or through the entry | filled at the open, before the cancel | none |
+| Bars, only the bar's range reaches the entry | assumed filled first (worst case) | `cancel_bar` |
+| Bars, the level is not reached | cancelled | none |
+
+`cancel_bar` stays on the position until it closes and is not replaced by a same-bar stop or
+target; accounting writes `intrabar_rule = cancel_bar`, `worst_case = true`, and the run
+summary counts `intrabar_cancel_bar`. The freeze level applies only to an order still pending
+after these cases. The cancel report (REJECTED) says the order filled before the cancel, and
+under which assumption; the engine journals it as `cancel_failed`.
+
+Tests: golden scenario 14 `cancel_and_entry_in_one_bar` (BUY STOP at 09:55, session end 10:00
+UTC, cancel at 10:00:00.200 inside a bar that opens below the entry and crosses it; assumed
+fill 2000.55, timeout at 10:25:00.200, −12.90, `cancel_bar`), which produced no trade on the old
+code; plus focused unit checks for no touch, freeze-only-if-pending, a fill at the bar open,
+`cancel_bar` with a same-bar stop, and tick ordering. No existing golden number changed. The
+reference strategy uses market orders only, so its runs are unaffected.

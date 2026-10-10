@@ -34,8 +34,12 @@ _Last updated: 2026-10-10._
    in-window trade. `parity.json` carries counts, totals, difference, tolerance and booleans.
    The tester settings that must match (commission, leverage, deposit, modelling, delays) are
    a table in `docs/strategies/reference_fixed_time.md`. Never loosen a tolerance to pass.
-3. **Cancel inside a bar** (Phase 4 known issue 7): flag it as a worst-case case now
-   (an `IntrabarRule`, like `close_bar`) instead of an unflagged assumption. Golden scenario.
+3. ~~**Cancel inside a bar**~~ — **done** (Phase 4 issue 7, ADR-0009 §5). On bars, a cancel
+   arriving inside a bar that reaches the pending entry: opened through the level → filled
+   first, not flagged; only the range reached it → assumed filled first (worst case),
+   `intrabar_rule = cancel_bar`, `worst_case = true`, kept over any same-bar exit; not reached
+   → cancelled. Freeze level only if still pending. Ticks keep the exact order. Summary key
+   `intrabar_cancel_bar`. Golden scenario `cancel_and_entry_in_one_bar` (14th).
 4. **Phase 3b (Dukascopy) trigger** — record in ADR-0008/0009 and enforce in the Phase 5 report:
    open Phase 3b if a candidate has **> 1%** of trades decided by the worst-case rule, **or** if
    flipping every flagged trade to its best case changes the **sign of net P&L or the pass/fail

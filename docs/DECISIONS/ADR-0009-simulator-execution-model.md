@@ -31,8 +31,18 @@ from 2026-06-26 (ADR-0007); before that, back to 2020-11-12, only M1 bars exist.
    a bar that also reaches the stop takes the stop (worst case); if the bar reaches only the
    target, the close at the open is assumed first and the target is not credited. Both are
    flagged `close_bar` (added 2026-10-09 in Phase 4, after the full-history run exposed the
-   unflagged and target-crediting cases). On exact tick days, ticks decide and nothing is
-   flagged.
+   unflagged and target-crediting cases). A cancel (session boundary, kill, reconcile) is
+   resolved against the pending entry before the order is deleted (added 2026-10-10, Phase 4
+   issue 7): if the bar the cancel arrives in **opened** at or through the entry level, the
+   order filled before the cancel (certain, not flagged); if only the bar's **range** reached
+   the level, the order of the two is unknown and the entry is assumed first (worst case: an
+   unwanted position), flagged `cancel_bar`. The flag stays on the trade until it closes and
+   wins over any later rule (a stop or target in the same bar does not replace it). If the bar
+   never reached the level the cancel goes through. A cancel that executes on the bar's open
+   quote itself (arrival at or before the open) goes through, as on ticks. The freeze level
+   applies only to an order still pending after this. On exact tick days, ticks decide and
+   nothing is flagged: a trigger on a quote before the cancel's quote fills, otherwise the
+   cancel wins.
 6. **Costs.** Commission `per_lot_per_side × volume` per fill, rounded to cents and booked
    negative, as the broker does (measured 2026-10-09: 2.25/lot/side; a 0.01-lot fill books
    0.02). Profit is booked to the cent.
