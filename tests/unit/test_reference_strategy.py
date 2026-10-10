@@ -68,7 +68,7 @@ def test_no_signal_when_decision_bar_missing() -> None:
     assert strategy().on_bar(mkt.store.view_at(at("08:00"))) is None
 
 
-def test_m15_variant_and_alignment() -> None:
+def test_m15_variant_and_params_validation() -> None:
     mkt = m5_market()
     assert strategy(Timeframe.M15).on_bar(mkt.store.view_at(at("08:00"))) is not None
     with pytest.raises(ValueError, match="M15 bar close"):
@@ -80,9 +80,6 @@ def test_m15_variant_and_alignment() -> None:
             point=0.01,
             decision_timeframe=Timeframe.M15,
         )
-
-
-def test_params_validation() -> None:
     with pytest.raises(ValidationError, match="unique"):
         ReferenceParams.model_validate(
             {"entries": [{"time_utc": "08:00", "side": "BUY", "stop_points": 1}] * 2}
@@ -129,22 +126,12 @@ def test_fixed_volume_risk_approves_and_prices_risk() -> None:
     assert d.risk_amount == pytest.approx(51.0 + 0.45)
 
 
-@pytest.mark.parametrize(
-    ("risk", "context", "reason"),
-    [
-        (FixedVolumeRisk(0.10), ctx(SessionPhase.NO_NEW_ENTRIES), "no new entries"),
-        (FixedVolumeRisk(0.005), ctx(), "not tradable"),
-    ],
-)
-def test_fixed_volume_risk_rejects(
-    risk: FixedVolumeRisk, context: RiskContext, reason: str
-) -> None:
-    d = risk.evaluate(signal(Side.BUY, stop_loss=1995.0), context)
-    assert not d.approved
-    assert reason in "; ".join(d.reasons)
-
-
-def test_fixed_volume_risk_rejects_stop_through_market() -> None:
-    d = FixedVolumeRisk(0.10).evaluate(signal(Side.BUY, stop_loss=2001.0), ctx())
-    assert not d.approved
-    assert "not beyond" in d.reasons[0]
+def test_fixed_volume_risk_rejects() -> None:
+    for risk, context, stop, reason in [
+        (FixedVolumeRisk(0.10), ctx(SessionPhase.NO_NEW_ENTRIES), 1995.0, "no new entries"),
+        (FixedVolumeRisk(0.005), ctx(), 1995.0, "not tradable"),
+        (FixedVolumeRisk(0.10), ctx(), 2001.0, "not beyond"),  # stop through the market
+    ]:
+        d = risk.evaluate(signal(Side.BUY, stop_loss=stop), context)
+        assert not d.approved
+        assert reason in "; ".join(d.reasons), reason

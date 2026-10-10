@@ -16,22 +16,11 @@ timeframes = st.sampled_from(list(Timeframe))
 
 
 @given(now=instants, tf=timeframes)
-def test_last_completed_bar_is_never_in_the_future(now: datetime, tf: Timeframe) -> None:
+def test_last_completed_bar_is_the_latest_closed_one(now: datetime, tf: Timeframe) -> None:
     span = tf.last_completed_bar(now)
-    assert span.close_time <= now
-
-
-@given(now=instants, tf=timeframes)
-def test_last_completed_bar_is_the_latest_one(now: datetime, tf: Timeframe) -> None:
-    span = tf.last_completed_bar(now)
+    assert span.close_time <= now  # never in the future
     # The next bar is still forming: it closes strictly after now.
-    assert span.close_time + tf.duration > now
     assert now - span.close_time < tf.duration
-
-
-@given(now=instants, tf=timeframes)
-def test_spans_are_aligned_and_one_duration_long(now: datetime, tf: Timeframe) -> None:
-    span = tf.last_completed_bar(now)
     assert tf.is_aligned(span.open_time)
     assert tf.bar_close_time(span.open_time) == span.close_time
     assert span.close_time - span.open_time == tf.duration

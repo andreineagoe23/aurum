@@ -17,32 +17,19 @@ def bar(open_time: datetime = datetime(2026, 3, 30, 9, tzinfo=UTC), **kw: float)
 # --------------------------------------------------------------------------- time rules
 
 
-def test_naive_timestamps_rejected_everywhere() -> None:
+def test_model_conventions() -> None:
+    """Aware UTC times only, frozen, unknown fields rejected (CLAUDE.md conventions)."""
+    from zoneinfo import ZoneInfo
+
     naive = datetime(2026, 3, 30, 8, 0)  # noqa: DTZ001
     with pytest.raises(ValidationError, match="timezone"):
         Tick(symbol="XAUUSD", time=naive, bid=1, ask=1.1)
-
-
-def test_aware_non_utc_is_normalised_to_utc() -> None:
-    from zoneinfo import ZoneInfo
-
-    t = Tick(
-        symbol="XAUUSD",
-        time=datetime(2026, 7, 1, 9, tzinfo=ZoneInfo("Europe/London")),
-        bid=1,
-        ask=1.1,
-    )
+    london = datetime(2026, 7, 1, 9, tzinfo=ZoneInfo("Europe/London"))
+    t = Tick(symbol="XAUUSD", time=london, bid=1, ask=1.1)
     assert t.time == datetime(2026, 7, 1, 8, tzinfo=UTC)
     assert t.time.tzinfo is UTC
-
-
-def test_models_are_frozen() -> None:
-    t = tick()
     with pytest.raises(ValidationError):
         t.bid = 1.0  # type: ignore[misc]
-
-
-def test_unknown_fields_rejected() -> None:
     with pytest.raises(ValidationError):
         Tick(symbol="XAUUSD", time=T0, bid=1, ask=2, foo=1)  # type: ignore[call-arg]
 
@@ -70,14 +57,11 @@ def test_bar_close_time_and_validation() -> None:
         bar(low=2000.5)
 
 
-def test_market_event_rejects_bar_before_close() -> None:
+def test_market_event_rules() -> None:
     b = bar()
     MarketEvent(time=b.close_time, symbol="XAUUSD", bar=b)
     with pytest.raises(ValidationError, match="look-ahead"):
         MarketEvent(time=b.close_time - timedelta(seconds=1), symbol="XAUUSD", bar=b)
-
-
-def test_market_event_rules() -> None:
     t = tick()
     MarketEvent(time=t.time, symbol="XAUUSD", tick=t)
     with pytest.raises(ValidationError, match="before its quote time"):
@@ -117,32 +101,22 @@ def test_symbol_spec_helpers() -> None:
 # --------------------------------------------------------------------------- decisions
 
 
-def test_signal_causality_data_as_of_not_after_decision() -> None:
+def test_signal_validation() -> None:
     sig = signal()
-    with pytest.raises(ValidationError, match="after decision time"):
+    with pytest.raises(ValidationError, match="after decision time"):  # causality
         sig.model_validate(sig.model_dump() | {"data_as_of": sig.time + timedelta(seconds=1)})
-
-
-def test_signal_requires_objective_reasons() -> None:
-    sig = signal()
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError):  # objective reasons are mandatory
         sig.model_validate(sig.model_dump() | {"reasons": ()})
-
-
-@pytest.mark.parametrize(
-    ("side", "sl", "tp"),
-    [
+    for side, sl, tp in [
         (Side.BUY, 2001.0, None),
         (Side.BUY, 1995.0, 1999.0),
         (Side.SELL, 1999.0, None),
         (Side.SELL, 2005.0, 2001.0),
-    ],
-)
-def test_signal_protective_levels_must_be_on_correct_side(
-    side: Side, sl: float, tp: float | None
-) -> None:
-    with pytest.raises(ValidationError, match="beyond entry"):
-        signal(side, stop_loss=sl, take_profit=tp, entry_type=OrderType.LIMIT, entry_price=2000.0)
+    ]:
+        with pytest.raises(ValidationError, match="beyond entry"):
+            signal(
+                side, stop_loss=sl, take_profit=tp, entry_type=OrderType.LIMIT, entry_price=2000.0
+            )
 
 
 def test_signal_key_is_deterministic() -> None:

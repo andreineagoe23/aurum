@@ -51,10 +51,6 @@ def order(
     return intent(side, 0.20, stop_loss=sl, take_profit=tp, **kw)
 
 
-def test_sim_broker_satisfies_broker_port() -> None:
-    assert isinstance(ticks_sim(), BrokerPort)
-
-
 # ------------------------------------------------------------------------------ TICKS mode
 
 
@@ -140,15 +136,12 @@ def test_close_after_stop_already_hit_is_rejected() -> None:
     assert broker.trades[0].exit_reason is DealReason.STOP_LOSS
 
 
-def test_no_quote_within_wait_is_rejected() -> None:
+def test_no_quote_or_market_closed_is_rejected(app_config: AppConfig) -> None:
     broker = ticks_sim()
     broker._clock.set(at("09:00"))  # type: ignore[attr-defined]
     report = broker.send_order(order())
     assert report.status is ExecutionStatus.REJECTED
     assert "no quote" in report.message
-
-
-def test_market_closed_is_rejected(app_config: AppConfig) -> None:
     broker = ticks_sim(market_hours=MarketHours(app_config.data.market))
     broker._clock.set(at("21:30"))  # type: ignore[attr-defined]  # daily break 21:00-22:00 UTC
     report = broker.send_order(order())
@@ -187,7 +180,17 @@ def test_unapproved_intent_raises() -> None:
         broker.send_order(bad)
 
 
-def test_margin_and_rejection_hook() -> None:
+def test_check_order_margin_and_rejection_hook() -> None:
+    broker = ticks_sim()
+    ok = broker.check_order(order())
+    assert ok.ok
+    assert ok.margin_required == pytest.approx(80.004)  # 0.20 x 100 oz x ask 2000.10 / 500
+    bad = broker.check_order(intent(Side.BUY, 0.005, stop_loss=1999.0, t=T0))
+    assert not bad.ok
+    assert any("invalid volume" in r for r in bad.reasons)
+    early, clock = sim(market(ticks={DAY: TAPE}))
+    clock.set(at("07:00"))
+    assert "no quote" in early.check_order(order()).reasons
     poor = ticks_sim(balance=50.0, leverage=100)  # 0.20 lot x 100 oz x 2000 / 100 = 400
     assert "insufficient margin" in poor.send_order(order()).message
     picky = ticks_sim(rejection_hooks=[lambda i, q: "spread" if q.spread > 0.05 else None])
@@ -234,16 +237,7 @@ def test_pending_price_must_respect_side_and_cancel_works() -> None:
     assert broker.cancel_order(placed.order_id).status is ExecutionStatus.REJECTED
 
 
-def test_freeze_level_blocks_modify_near_stop() -> None:
-    broker = ticks_sim(symbol_spec=spec(freeze_level=20))
-    broker.send_order(order(sl=1999.85, tp=None))
-    pos = broker.positions()[0]
-    report = broker.modify_position(pos.position_id, 1999.00, None)
-    assert report.status is ExecutionStatus.REJECTED  # bid 2000.00 is 15 points from SL 1999.85
-    assert "freeze" in report.message
-
-
-def test_modify_position_validates_stops() -> None:
+def test_modify_position_validates_stops_and_freeze_level() -> None:
     broker = ticks_sim()
     broker.send_order(order(sl=1999.00, tp=None))
     pos = broker.positions()[0]
@@ -251,6 +245,11 @@ def test_modify_position_validates_stops() -> None:
     ok = broker.modify_position(pos.position_id, 1999.80, 2003.00)
     assert ok.status is ExecutionStatus.MODIFIED
     assert broker.positions()[0].stop_loss == 1999.80
+    frozen = ticks_sim(symbol_spec=spec(freeze_level=20))
+    frozen.send_order(order(sl=1999.85, tp=None))
+    report = frozen.modify_position(frozen.positions()[0].position_id, 1999.00, None)
+    assert report.status is ExecutionStatus.REJECTED  # bid 2000.00 is 15 points from SL 1999.85
+    assert "freeze" in report.message
 
 
 # ------------------------------------------------------------------------------ BARS mode
@@ -350,6 +349,10 @@ def test_bar_mode_close_without_a_bar_waits_and_fails() -> None:
 
 def test_data_reads_never_reach_past_now() -> None:
     broker, clock = sim(market(ticks={DAY: TAPE}))
+    assert isinstance(broker, BrokerPort)
+    clock.set(at("07:00"))
+    with pytest.raises(NoMarketDataError):  # no quote yet
+        broker.latest_tick("XAUUSD")
     clock.set(at("08:00:01"))
     ticks = broker.ticks("XAUUSD", at("07:00"), at("09:00"))
     assert [t.time for t in ticks][-1] == at("08:00:01")  # inclusive of now, nothing later
@@ -363,26 +366,6 @@ def test_data_reads_never_reach_past_now() -> None:
     assert (m1[1].close, m1[1].spread_points) == (1999.50, 10)
     with pytest.raises(BrokerError):
         broker.latest_tick("EURUSD")
-
-
-def test_latest_tick_without_any_quote_raises() -> None:
-    broker, clock = sim(market(ticks={DAY: TAPE}))
-    clock.set(at("07:00"))
-    with pytest.raises(NoMarketDataError):
-        broker.latest_tick("XAUUSD")
-
-
-def test_check_order_reports_reasons_and_margin() -> None:
-    broker = ticks_sim()
-    ok = broker.check_order(order())
-    assert ok.ok
-    assert ok.margin_required == pytest.approx(80.004)  # 0.20 x 100 oz x ask 2000.10 / 500
-    bad = broker.check_order(intent(Side.BUY, 0.005, stop_loss=1999.0, t=T0))
-    assert not bad.ok
-    assert any("invalid volume" in r for r in bad.reasons)
-    early, clock = sim(market(ticks={DAY: TAPE}))
-    clock.set(at("07:00"))
-    assert "no quote" in early.check_order(order()).reasons
 
 
 def test_sell_limit_entry_fills_at_its_price_then_target() -> None:

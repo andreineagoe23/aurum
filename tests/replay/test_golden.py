@@ -97,9 +97,5 @@ def test_golden_scenario(app_config: AppConfig, scenario: Scenario) -> None:
         details = [e.detail for e in result.journal if str(e.event) == event]
         assert any(fragment in d for d in details), (event, fragment, details)
 
-
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda s: s.name)
-def test_golden_scenario_is_deterministic(app_config: AppConfig, scenario: Scenario) -> None:
-    _, first = replay(app_config, scenario)
-    _, second = replay(app_config, scenario)
-    assert first.equals(second)
+    # Deterministic: a second replay gives the same trades.
+    assert replay(app_config, scenario)[1].equals(trades)

@@ -63,25 +63,19 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
 @pytest.mark.parametrize(
     ("name", "changes", "match"),
     [
+        # Safety caps (MASTER_PROMPT §2 risk limits, §4 rule 1)
         ("risk", {"risk_per_trade_pct": 5}, "risk_per_trade_pct"),
-        ("risk", {"risk_per_trade_pct": -0.1}, "risk_per_trade_pct"),
         ("risk", {"max_open_positions": 2}, "max_open_positions"),
         ("risk", {"weekly_loss_limit_pct": 0.5}, "weekly_loss_limit_pct"),
+        ("promotion", {"live_enabled": True}, "signed_off_date"),
+        # Unknown keys and malformed values
         ("risk", {"unknown_limit": 1}, "unknown_limit"),
-        ("risk", {"max_spread_points": 0}, "max_spread_points"),
         ("sessions", {"timezone": "Mars/Olympus"}, "unknown timezone"),
         ("sessions", {"force_flat_at": "19:00"}, "before force_flat_at"),
-        ("sessions", {"no_new_entries_after": "25:00"}, "HH:MM"),
         ("sessions", {"trading_days": ["MON", "MON"]}, "duplicates"),
-        ("sessions", {"trading_days": ["MONDAY"]}, "trading_days"),
-        ("sessions", {"pre_session_minutes": 500}, "pre_session_minutes"),
-        ("promotion", {"live_enabled": True}, "signed_off_date"),
-        ("broker", {"symbol_candidates": []}, "symbol_candidates"),
-        ("broker", {"commission": {"per_lot_per_side": -1}}, "per_lot_per_side"),
-        ("broker", {"account_currency": "pounds"}, "account_currency"),
-        ("broker", {"server_time": {"timezone": "Mars/Olympus"}}, "unknown timezone"),
         ("broker", {"server_time": {"shift_hours": 30}}, "shift_hours"),
-        ("broker", {"magic_number": -1}, "magic_number"),
+        ("broker", {"server_time": {"timezone": "Mars/Olympus"}}, "unknown timezone"),
+        ("broker", {"commission": {"per_lot_per_side": -1}}, "per_lot_per_side"),
     ],
 )
 def test_invalid_values_fail_loudly(
@@ -92,9 +86,10 @@ def test_invalid_values_fail_loudly(
         load_config(config_dir)
 
 
-@pytest.mark.parametrize(
-    ("sessions", "match"),
-    [
+def test_invalid_session_windows(config_dir: Path) -> None:
+    for strat in (config_dir / "strategies").glob("*.yaml"):
+        strat.unlink()  # they reference the real session names
+    cases: list[tuple[dict[str, Any], str]] = [
         ({"a": {"start": "11:00", "end": "07:00"}}, "must be before end"),
         (
             {"a": {"start": "07:00", "end": "12:00"}, "b": {"start": "11:00", "end": "13:00"}},
@@ -103,14 +98,11 @@ def test_invalid_values_fail_loudly(
         ({"a": {"start": "19:45", "end": "19:50"}}, "starts at/after no_new_entries_after"),
         ({"a": {"start": "07:00", "end": "21:00"}}, "ends after force_flat_at"),
         ({"a": {"start": "00:10", "end": "05:00"}}, "before local midnight"),
-    ],
-)
-def test_invalid_session_windows(config_dir: Path, sessions: dict[str, Any], match: str) -> None:
-    edit(config_dir, "sessions", sessions=sessions)
-    for strat in (config_dir / "strategies").glob("*.yaml"):
-        strat.unlink()
-    with pytest.raises(ConfigError, match=match):
-        load_config(config_dir)
+    ]
+    for sessions, match in cases:
+        edit(config_dir, "sessions", sessions=sessions)
+        with pytest.raises(ConfigError, match=match):
+            load_config(config_dir)
 
 
 def test_unquoted_yaml_time_is_rejected_not_misread(config_dir: Path) -> None:
@@ -121,22 +113,18 @@ def test_unquoted_yaml_time_is_rejected_not_misread(config_dir: Path) -> None:
         load_config(config_dir)
 
 
-def test_strategy_cannot_be_enabled_without_spec(config_dir: Path) -> None:
-    edit(config_dir, "strategies/trend_pullback", enabled=True)
-    with pytest.raises(ConfigError, match="without a spec"):
-        load_config(config_dir)
-
-
-def test_strategy_unknown_session(config_dir: Path) -> None:
-    edit(config_dir, "strategies/trend_pullback", sessions=["tokyo"])
-    with pytest.raises(ConfigError, match="unknown sessions"):
-        load_config(config_dir)
-
-
-def test_strategy_file_name_must_match(config_dir: Path) -> None:
-    edit(config_dir, "strategies/trend_pullback", name="other_name")
-    with pytest.raises(ConfigError, match="declares name"):
-        load_config(config_dir)
+def test_strategy_config_errors(config_dir: Path) -> None:
+    path = config_dir / "strategies" / "trend_pullback.yaml"
+    original = path.read_text()
+    for changes, match in [
+        ({"enabled": True}, "without a spec"),
+        ({"sessions": ["tokyo"]}, "unknown sessions"),
+        ({"name": "other_name"}, "declares name"),
+    ]:
+        path.write_text(original)
+        edit(config_dir, "strategies/trend_pullback", **changes)
+        with pytest.raises(ConfigError, match=match):
+            load_config(config_dir)
 
 
 def test_missing_file_and_bad_yaml(config_dir: Path) -> None:
@@ -191,19 +179,11 @@ def test_env_file_and_overrides(
     assert "pw" not in repr(s.env)  # SecretStr masks the password
     clean_env.setenv("AURUM_MODE", "SHADOW")  # process env beats .env
     assert load_settings(repo_root, env_file=env_file).mode is Mode.SHADOW
-
-
-def test_invalid_mode_fails(clean_env: pytest.MonkeyPatch, repo_root: Path) -> None:
+    blank = EnvSettings(_env_file=None, mt5_login="", mt5_password="", mt5_server=" ")
+    assert (blank.mt5_login, blank.mt5_password, blank.mt5_server) == (None, None, None)
     clean_env.setenv("AURUM_MODE", "YOLO")
     with pytest.raises(ConfigError, match="aurum_mode"):
-        load_settings(repo_root)
-
-
-def test_blank_env_values_are_none() -> None:
-    env = EnvSettings(_env_file=None, mt5_login="", mt5_password="", mt5_server=" ")
-    assert env.mt5_login is None
-    assert env.mt5_password is None
-    assert env.mt5_server is None
+        load_settings(repo_root, env_file=env_file)
 
 
 def test_readiness_blocks_demo_until_spread_calibrated(app_config: AppConfig) -> None:

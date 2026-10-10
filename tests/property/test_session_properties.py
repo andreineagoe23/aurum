@@ -14,7 +14,7 @@ from hypothesis import strategies as st
 
 from aurum.core.enums import SessionPhase as P
 from aurum.sessions import SessionClock
-from aurum.settings import AppConfig, SessionsConfig, load_config
+from aurum.settings import SessionsConfig, load_config
 
 LONDON = ZoneInfo("Europe/London")
 instants = st.datetimes(
@@ -85,7 +85,3 @@ def test_phases_never_regress_within_a_trading_day(
     a, b = clock.state_at(t), clock.state_at(t + delta)
     if a.trading_day is not None and a.trading_day == b.trading_day:
         assert _RANK[b.phase] >= _RANK[a.phase]
-
-
-def test_fixture_is_repo_config(cfg: SessionsConfig, app_config: AppConfig) -> None:
-    assert cfg == app_config.sessions

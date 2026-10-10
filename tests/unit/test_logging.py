@@ -20,21 +20,14 @@ def _redact(event: dict) -> dict:  # type: ignore[type-arg]
     return dict(redact_secrets(None, "info", event))
 
 
-@pytest.mark.parametrize("key", ["password", "mt5_password", "MT5_PASSWORD", "api_key", "token"])
-def test_secret_keys_masked(key: str) -> None:
-    out = _redact({key: "hunter2", "event": "e"})
-    assert out[key] == "***"
-    assert out["event"] == "e"
-
-
-def test_nested_secret_masked() -> None:
+def test_secret_keys_masked() -> None:
+    for key in ["password", "mt5_password", "MT5_PASSWORD", "api_key", "token"]:
+        out = _redact({key: "hunter2", "event": "e"})
+        assert (out[key], out["event"]) == ("***", "e"), key
     out = _redact({"cfg": {"secret": "s3", "host": "h"}})
-    assert out["cfg"] == {"secret": "***", "host": "h"}
-
-
-def test_other_keys_untouched() -> None:
-    out = _redact({"login": 123, "server": "demo", "event": "x"})
-    assert out == {"login": 123, "server": "demo", "event": "x"}
+    assert out["cfg"] == {"secret": "***", "host": "h"}  # nested
+    untouched = {"login": 123, "server": "demo", "event": "x"}
+    assert _redact(dict(untouched)) == untouched
 
 
 def test_end_to_end_json(capsys: pytest.CaptureFixture[str]) -> None:

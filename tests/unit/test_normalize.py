@@ -1,7 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
 import polars as pl
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -37,6 +36,10 @@ def test_schema_and_spread_points() -> None:
     assert out["spread_points"].to_list() == [8, 9]
     assert out["source"].unique().to_list() == ["mt5_history"]
     assert stats.kept == 2  # type: ignore[attr-defined]
+    empty, empty_stats = norm(raw([]))
+    assert empty.height == 0
+    assert empty.columns == NORMALIZED_TICKS.names
+    assert empty_stats.median_spread_points is None  # type: ignore[attr-defined]
 
 
 def test_invalid_rows_dropped_and_counted() -> None:
@@ -67,13 +70,11 @@ def test_crossed_and_outlier_flags_keep_rows() -> None:
     assert out["spread_outlier"].to_list()[-2:] == [True, False]  # 60 > 5 x 8
     assert out["crossed"].to_list()[-2:] == [False, True]
     assert (stats.spread_outliers, stats.crossed) == (1, 1)  # type: ignore[attr-defined]
-
-
-def test_empty_day() -> None:
-    out, stats = norm(raw([]))
-    assert out.height == 0
-    assert out.columns == NORMALIZED_TICKS.names
-    assert stats.median_spread_points is None  # type: ignore[attr-defined]
+    # The outlier factor is configurable: a 50-point spread against a 10-point median.
+    rows = [(i, 4000.0, 4000.10) for i in range(5)] + [(9, 4000.0, 4000.50)]
+    for factor in (2.0, 10.0):
+        out, _ = norm(raw(rows), factor)
+        assert out["spread_outlier"].to_list()[-1] is (factor * 10 < 50), factor
 
 
 tick_rows = st.lists(
@@ -100,10 +101,3 @@ def test_deterministic_sorted_and_idempotent(rows: list[tuple[int, float, float]
     twice, stats = norm(back.select(RAW_TICKS.names))
     assert twice.equals(first)
     assert stats.duplicates == stats.invalid == stats.out_of_order == 0  # type: ignore[attr-defined]
-
-
-@pytest.mark.parametrize("factor", [2.0, 10.0])
-def test_outlier_factor_is_configurable(factor: float) -> None:
-    rows = [(i, 4000.0, 4000.10) for i in range(5)] + [(9, 4000.0, 4000.50)]
-    out, _ = norm(raw(rows), factor)
-    assert out["spread_outlier"].to_list()[-1] is (factor * 10 < 50)

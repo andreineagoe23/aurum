@@ -39,13 +39,10 @@ def store(tmp_path: Path) -> LiveTickStore:
     return LiveTickStore(DataLayout(tmp_path), "XAUUSD")
 
 
-def test_empty_store_has_no_cursor(store: LiveTickStore) -> None:
-    assert store.tail() is None
-
-
 def test_cursor_counts_rows_sharing_the_last_millisecond_across_chunks(
     store: LiveTickStore,
 ) -> None:
+    assert store.tail() is None  # empty store
     store.append(frame([T, T + timedelta(milliseconds=5), T + timedelta(milliseconds=5)]))
     store.append(frame([T + timedelta(milliseconds=5)], bid=4001.0))
     assert store.tail() == TickCursor(time=T + timedelta(milliseconds=5), rows_at_time=3)
@@ -67,12 +64,8 @@ def test_append_splits_by_utc_day_and_read_day_keeps_order(store: LiveTickStore)
     store.append(frame([late + timedelta(seconds=3)], bid=4100.0))
     assert store.read_day(date(2026, 10, 8))["bid"].to_list() == [4000.01, 4100.0]
     assert store.tail() == TickCursor(time=late + timedelta(seconds=3), rows_at_time=1)
-
-
-def test_foreign_files_are_ignored(store: LiveTickStore) -> None:
-    store.append(frame([T]))
-    (store.layout.live_ticks_dir("XAUUSD", T.date()) / "notes.txt").write_text("x")
-    assert len(store.chunks(T.date())) == 1
+    (store.layout.live_ticks_dir("XAUUSD", late.date()) / "notes.txt").write_text("x")
+    assert len(store.chunks(late.date())) == 1  # foreign files are ignored
     assert store.read_day(date(2026, 1, 1)).height == 0
 
 
@@ -129,8 +122,5 @@ def test_snapshot_written_on_contract_change_or_new_day_only(tmp_path: Path) -> 
     next_day = snapshot_if_changed(tmp_path, spec(T + timedelta(days=1)), swap_changed, server="S")
     assert next_day is not None
     assert len(list((tmp_path / "specs" / "XAUUSD").glob("*.json"))) == 3
-
-
-def test_contract_fingerprint_ignores_quotes() -> None:
     assert contract_fingerprint(RAW) == contract_fingerprint({**RAW, "bid": 1.0, "time": 5})
     assert contract_fingerprint(RAW) != contract_fingerprint({**RAW, "volume_min": 0.1})

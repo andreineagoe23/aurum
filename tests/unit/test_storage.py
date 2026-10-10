@@ -45,36 +45,28 @@ def test_round_trip_keeps_schema_and_values(tmp_path: Path) -> None:
     assert back["time"].dtype == pl.Datetime("ms", "UTC")
     assert back["volume"].dtype == pl.UInt64
     assert back["bid"].to_list() == [4000.0, 4001.0, 4002.0]
+    empty = write_parquet(
+        empty_frame(RAW_TICKS), tmp_path / "e.parquet", RAW_TICKS, overwrite=False
+    )
+    assert read_parquet(empty, RAW_TICKS).height == 0
 
 
-def test_immutable_write_refuses_to_overwrite(tmp_path: Path) -> None:
+def test_raw_is_immutable_and_derived_is_replaced(tmp_path: Path) -> None:
     path = write_parquet(ticks(), tmp_path / "t.parquet", RAW_TICKS, overwrite=False)
     with pytest.raises(FileExistsError):
         write_parquet(ticks(5), path, RAW_TICKS, overwrite=False)
     assert read_parquet(path).height == 3
     assert not list(tmp_path.glob("*.tmp"))  # temp file cleaned up
-
-
-def test_overwrite_replaces_atomically(tmp_path: Path) -> None:
-    path = write_parquet(ticks(), tmp_path / "t.parquet", RAW_TICKS, overwrite=True)
-    write_parquet(ticks(5), path, RAW_TICKS, overwrite=True)
+    write_parquet(ticks(5), path, RAW_TICKS, overwrite=True)  # derived data: atomic replace
     assert read_parquet(path).height == 5
 
 
-def test_missing_column_is_an_error(tmp_path: Path) -> None:
+def test_schema_mismatch_is_an_error(tmp_path: Path) -> None:
     with pytest.raises(pl.exceptions.ColumnNotFoundError):
         write_parquet(ticks().drop("flags"), tmp_path / "t.parquet", RAW_TICKS, overwrite=False)
-
-
-def test_read_with_wrong_schema_is_an_error(tmp_path: Path) -> None:
     path = write_parquet(ticks(), tmp_path / "t.parquet", RAW_TICKS, overwrite=False)
     with pytest.raises(ValueError, match="expected"):
         read_parquet(path, RAW_TICKS.remove(0))
-
-
-def test_empty_frame_has_schema(tmp_path: Path) -> None:
-    path = write_parquet(empty_frame(RAW_TICKS), tmp_path / "e.parquet", RAW_TICKS, overwrite=False)
-    assert read_parquet(path, RAW_TICKS).height == 0
 
 
 def test_remove_stale_temps(tmp_path: Path) -> None:

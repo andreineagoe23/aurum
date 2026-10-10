@@ -30,23 +30,19 @@ def fb(clock: ManualClock) -> FakeBroker:
     return b
 
 
-def test_satisfies_broker_port(fb: FakeBroker) -> None:
+def _sell() -> OrderIntent:
+    return intent(Side.SELL)
+
+
+def test_buy_fills_at_ask_sell_at_bid_and_slippage_is_adverse(
+    fb: FakeBroker, clock: ManualClock
+) -> None:
     assert isinstance(fb, BrokerPort)
-
-
-def test_buy_fills_at_ask_sell_at_bid(fb: FakeBroker) -> None:
     buy = fb.send_order(intent(Side.BUY))
     sell = fb.send_order(_sell())
     assert buy.status is ExecutionStatus.FILLED
     assert buy.fill_price == 2000.20
     assert sell.fill_price == 2000.00
-
-
-def _sell() -> OrderIntent:
-    return intent(Side.SELL)
-
-
-def test_slippage_is_adverse(clock: ManualClock) -> None:
     b = FakeBroker(clock=clock, slippage_points=5)
     b.add_ticks([tick(bid=2000.00, ask=2000.20)])
     b.connect()
@@ -94,20 +90,14 @@ def test_unapproved_intent_bypassing_validation_is_refused(fb: FakeBroker) -> No
     assert not fb.check_order(bypassed).ok
 
 
-def test_invalid_volume_rejected(fb: FakeBroker) -> None:
+def test_invalid_orders_rejected(fb: FakeBroker, clock: ManualClock) -> None:
     report = fb.send_order(intent(volume=0.015))
     assert report.status is ExecutionStatus.REJECTED
     assert "invalid volume" in report.message
-
-
-def test_stop_on_wrong_side_of_market_rejected(fb: FakeBroker) -> None:
     # Signal had no reference price, but the market (ask 2000.20) is below the "stop".
     report = fb.send_order(intent(Side.BUY, stop_loss=2001.0))
     assert report.status is ExecutionStatus.REJECTED
     assert fb.positions() == []
-
-
-def test_stops_level_enforced(clock: ManualClock) -> None:
     spec = example_xauusd_spec().model_copy(update={"stops_level_points": 1000})
     b = FakeBroker(clock=clock, symbol_spec=spec)
     b.add_ticks([tick()])
@@ -134,19 +124,18 @@ def test_round_trip_pnl_and_commission(fb: FakeBroker, clock: ManualClock) -> No
     assert [d.entry for d in deals] == [DealEntry.IN, DealEntry.OUT]
     assert deals[1].side is Side.SELL
     assert sum(d.commission for d in deals) == pytest.approx(-0.45)  # $4.50/lot round trip
-
-
-def test_sell_pnl_sign(fb: FakeBroker, clock: ManualClock) -> None:
-    opened = fb.send_order(_sell())  # fills at bid 2000.00
+    # A short profits when the ask falls: open at bid 2003.20, close at ask 2002.20.
+    short = fb.send_order(intent(Side.SELL, volume=0.10, t=clock.now()))
     clock.advance(timedelta(minutes=1))
-    fb.add_ticks([tick(bid=1998.80, ask=1999.00, t=clock.now())])
-    assert opened.position_id is not None
-    fb.close_position(opened.position_id)  # closes at ask 1999.00
-    deals = fb.history_deals(T0, clock.now() + timedelta(seconds=1))
-    assert deals[-1].profit == pytest.approx(10.0)
+    fb.add_ticks([tick(bid=2002.00, ask=2002.20, t=clock.now())])
+    assert short.position_id is not None
+    fb.close_position(short.position_id)
+    assert fb.history_deals(T0, clock.now() + timedelta(seconds=1))[-1].profit == pytest.approx(
+        10.0
+    )
 
 
-def test_partial_close(fb: FakeBroker) -> None:
+def test_partial_close_and_modify(fb: FakeBroker) -> None:
     opened = fb.send_order(intent(volume=0.10))
     assert opened.position_id is not None
     fb.close_position(opened.position_id, volume=0.04)
@@ -154,11 +143,6 @@ def test_partial_close(fb: FakeBroker) -> None:
     assert pos.volume == pytest.approx(0.06)
     with pytest.raises(BrokerError):
         fb.close_position(opened.position_id, volume=1.0)
-
-
-def test_modify_position_validates_levels(fb: FakeBroker) -> None:
-    opened = fb.send_order(intent())
-    assert opened.position_id is not None
     report = fb.modify_position(opened.position_id, stop_loss=1997.0, take_profit=2010.0)
     assert report.status is ExecutionStatus.MODIFIED
     (pos,) = fb.positions()
@@ -196,7 +180,17 @@ def test_disconnected_broker_raises_everywhere(fb: FakeBroker) -> None:
             call()
 
 
-def test_bars_only_completed(fb: FakeBroker, clock: ManualClock) -> None:
+def test_reads_return_only_completed_bars_and_past_ticks(
+    fb: FakeBroker, clock: ManualClock
+) -> None:
+    fb.add_ticks([tick(t=T0 + timedelta(seconds=s)) for s in (1, 2, 3)])
+    clock.set(T0 + timedelta(seconds=2))
+    got = fb.ticks("XAUUSD", T0, T0 + timedelta(minutes=1))
+    assert [t.time for t in got] == [T0, T0 + timedelta(seconds=1), T0 + timedelta(seconds=2)]
+    with pytest.raises(BrokerError, match="unknown symbol"):
+        fb.symbol_info("EURUSD")
+    assert fb.symbol_info("XAUUSD").contract_size == 100
+
     def bar(open_time: datetime) -> Bar:
         return Bar(
             symbol="XAUUSD",
@@ -214,16 +208,3 @@ def test_bars_only_completed(fb: FakeBroker, clock: ManualClock) -> None:
     assert [b.open_time.hour for b in fb.bars("XAUUSD", Timeframe.H1, start, end)] == [6, 7]
     clock.set(datetime(2026, 3, 30, 9, 0, tzinfo=UTC))
     assert [b.open_time.hour for b in fb.bars("XAUUSD", Timeframe.H1, start, end)] == [6, 7, 8]
-
-
-def test_ticks_window_and_causality(fb: FakeBroker, clock: ManualClock) -> None:
-    fb.add_ticks([tick(t=T0 + timedelta(seconds=s)) for s in (1, 2, 3)])
-    clock.set(T0 + timedelta(seconds=2))
-    got = fb.ticks("XAUUSD", T0, T0 + timedelta(minutes=1))
-    assert [t.time for t in got] == [T0, T0 + timedelta(seconds=1), T0 + timedelta(seconds=2)]
-
-
-def test_unknown_symbol(fb: FakeBroker) -> None:
-    with pytest.raises(BrokerError, match="unknown symbol"):
-        fb.symbol_info("EURUSD")
-    assert fb.symbol_info("XAUUSD").contract_size == 100

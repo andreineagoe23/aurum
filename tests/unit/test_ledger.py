@@ -42,13 +42,21 @@ def _rec(lg: TrialLedger, strategy: str = "orb", variant: str = "m15", **kw: Any
     return lg.record_trial(strategy=strategy, variant=variant, **kw)
 
 
-def test_record_returns_record(ledger: TrialLedger) -> None:
-    rec = _rec(ledger)
+def test_record_and_get_roundtrip(ledger: TrialLedger, tmp_path: Path) -> None:
+    rec = _rec(ledger, notes="hello", code_version="abc", config_hash="h")
     assert rec.trial_id.startswith("tr_")
     assert rec.created_at == T0
     assert rec.created_at.utcoffset() == timedelta(0)
-    assert rec.strategy == "orb"
-    assert rec.params == {"n": 1}
+    assert (rec.strategy, rec.params) == ("orb", {"n": 1})
+    assert ledger.get_trial(rec.trial_id) == rec
+    with pytest.raises(LedgerError):
+        ledger.get_trial("tr_nope")
+    sealed = _rec(ledger, metrics={"sharpe": None, "n": 3.0}, sealed_test_opened=True)
+    got = ledger.get_trial(sealed.trial_id)
+    assert got.metrics == {"sharpe": None, "n": 3.0}
+    assert got.sealed_test_opened is True
+    assert rec.sealed_test_opened is False
+    assert current_code_version(tmp_path) is None  # outside git
 
 
 def test_list_insertion_order_and_filters(ledger: TrialLedger, clock: ManualClock) -> None:
@@ -63,31 +71,17 @@ def test_list_insertion_order_and_filters(ledger: TrialLedger, clock: ManualCloc
     assert ledger.list_trials(strategy="zzz") == []
 
 
-def test_get_trial_roundtrip(ledger: TrialLedger) -> None:
-    rec = _rec(ledger, notes="hello", code_version="abc", config_hash="h")
-    assert ledger.get_trial(rec.trial_id) == rec
-
-
-def test_get_unknown_raises(ledger: TrialLedger) -> None:
-    with pytest.raises(LedgerError):
-        ledger.get_trial("tr_nope")
-
-
-def test_count_trials(ledger: TrialLedger) -> None:
+def test_counts_and_ids_unique_with_frozen_clock(ledger: TrialLedger) -> None:
     assert ledger.count_trials() == 0
-    _rec(ledger, "a")
-    _rec(ledger, "a")
+    ids = {_rec(ledger, "a").trial_id for _ in range(200)}
     _rec(ledger, "b")
-    assert ledger.count_trials() == 3
-    assert ledger.count_trials("a") == 2
-    assert ledger.count_trials("b") == 1
-    assert ledger.count_trials("c") == 0
-
-
-def test_ids_unique_with_frozen_clock(ledger: TrialLedger) -> None:
-    ids = {_rec(ledger).trial_id for _ in range(200)}
     assert len(ids) == 200
-    assert ledger.count_trials() == 200
+    assert ledger.count_trials() == 201
+    assert (ledger.count_trials("a"), ledger.count_trials("b"), ledger.count_trials("c")) == (
+        200,
+        1,
+        0,
+    )
 
 
 def test_update_and_delete_blocked(ledger: TrialLedger, db_path: Path) -> None:
@@ -129,36 +123,15 @@ def test_persistence_across_reopen(db_path: Path, clock: ManualClock) -> None:
         assert again.verify() == []
 
 
-def test_nan_metric_rejected(ledger: TrialLedger) -> None:
-    with pytest.raises(LedgerError):
-        _rec(ledger, metrics={"sharpe": float("nan")})
-    assert ledger.count_trials() == 0
-
-
-def test_non_json_param_rejected(ledger: TrialLedger) -> None:
-    with pytest.raises(LedgerError):
-        _rec(ledger, params={"x": object()})
-
-
-def test_bad_date_range_rejected(ledger: TrialLedger) -> None:
-    with pytest.raises(LedgerError):
-        _rec(ledger, data_start=END, data_end=START)
-    with pytest.raises(LedgerError):
-        _rec(ledger, data_start=START, data_end=START)
-
-
-def test_naive_datetime_rejected(ledger: TrialLedger) -> None:
+def test_invalid_records_rejected(ledger: TrialLedger) -> None:
+    for bad in [
+        {"metrics": {"sharpe": float("nan")}},
+        {"params": {"x": object()}},
+        {"data_start": END, "data_end": START},
+        {"data_start": START, "data_end": START},
+    ]:
+        with pytest.raises(LedgerError):
+            _rec(ledger, **bad)
     with pytest.raises(NaiveDatetimeError):
         _rec(ledger, data_start=datetime(2023, 1, 1))  # noqa: DTZ001
-
-
-def test_none_metric_and_sealed_flag(ledger: TrialLedger) -> None:
-    rec = _rec(ledger, metrics={"sharpe": None, "n": 3.0}, sealed_test_opened=True)
-    got = ledger.get_trial(rec.trial_id)
-    assert got.metrics == {"sharpe": None, "n": 3.0}
-    assert got.sealed_test_opened is True
-    assert _rec(ledger).sealed_test_opened is False
-
-
-def test_current_code_version_outside_git(tmp_path: Path) -> None:
-    assert current_code_version(tmp_path) is None
+    assert ledger.count_trials() == 0

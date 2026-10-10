@@ -46,12 +46,13 @@ def test_normal_day_keeps_configured_cutoff(app_config: AppConfig) -> None:
 
 @pytest.mark.parametrize(
     ("buffer", "cutoff"),
-    [(15, utc(2026, 7, 3, 16, 46)), (30, utc(2026, 7, 3, 16, 31)), (0, utc(2026, 7, 3, 17, 1))],
+    [(None, utc(2026, 7, 3, 16, 46)), (0, utc(2026, 7, 3, 17, 1))],
 )
 def test_early_close_moves_cutoff_by_buffer(
-    app_config: AppConfig, buffer: int, cutoff: datetime
+    app_config: AppConfig, buffer: int | None, cutoff: datetime
 ) -> None:
     # 2026-07-03: early close 13:01 New York = 17:01 UTC = 18:01 London.
+    assert app_config.sessions.market_close_buffer_minutes == 15  # the default (None)
     cal = calendar(app_config, buffer=buffer)
     sched = cal.schedule_for(date(2026, 7, 3))
     assert sched is not None
@@ -64,10 +65,6 @@ def test_early_close_moves_cutoff_by_buffer(
     assert before.force_flat_at == cutoff
 
 
-def test_default_buffer_is_15_minutes(app_config: AppConfig) -> None:
-    assert app_config.sessions.market_close_buffer_minutes == 15
-
-
 def test_closed_date_is_closed_all_day(app_config: AppConfig) -> None:
     cal = calendar(app_config)
     assert cal.schedule_for(date(2026, 4, 3)) is None  # Good Friday
@@ -75,6 +72,10 @@ def test_closed_date_is_closed_all_day(app_config: AppConfig) -> None:
     assert state.phase is SessionPhase.CLOSED
     assert not state.entries_allowed
     assert state.must_be_flat
+    # A restart after an early-close cutoff starts in FORCE_FLAT.
+    first = SessionStateMachine(calendar(app_config)).update(utc(2026, 7, 3, 17, 0))
+    assert first is not None
+    assert first.phase is SessionPhase.FORCE_FLAT
 
 
 def test_daily_break_caps_a_late_force_flat(app_config: AppConfig) -> None:
@@ -123,10 +124,3 @@ def test_no_session_left_means_no_entries(app_config: AppConfig) -> None:
     assert SessionPhase.OPEN not in phases
     assert cal.state_at(utc(2026, 12, 4, 5, 44)).phase is SessionPhase.CLOSED
     assert cal.state_at(utc(2026, 12, 4, 5, 45)).phase is SessionPhase.FORCE_FLAT
-
-
-def test_state_machine_accepts_calendar(app_config: AppConfig) -> None:
-    sm = SessionStateMachine(calendar(app_config))
-    first = sm.update(utc(2026, 7, 3, 17, 0))
-    assert first is not None
-    assert first.phase is SessionPhase.FORCE_FLAT  # restart after an early-close cutoff

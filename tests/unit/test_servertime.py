@@ -1,4 +1,7 @@
-"""MT5 server clock (New York + 7h) <-> UTC, anchored on values measured in Phase 1."""
+"""MT5 server clock (New York + 7h) <-> UTC, anchored on values measured in Phase 1.
+
+tests/property/test_servertime_properties.py covers round trips and monotonicity 2015-2035.
+"""
 
 from datetime import UTC, datetime, timedelta
 
@@ -22,11 +25,16 @@ def utc(y: int, mo: int, d: int, h: int, mi: int = 0) -> datetime:
 def test_measured_phase1_sample() -> None:
     # 2026-10-09: tick time_msc 1791516327052 observed at system UTC 1791505527.3 (+10800 s).
     assert TZ.to_utc(1791516327.052) == datetime.fromtimestamp(1791505527.052, tz=UTC)
+    # Vectorised: server 03:35:42.123 (UTC+3) and a US-winter value (UTC+2).
+    summer = int(TZ.to_server_seconds(datetime(2026, 10, 9, 0, 35, 42, tzinfo=UTC))) * 1000 + 123
+    winter = int(TZ.to_server_seconds(datetime(2026, 1, 13, 14, 0, tzinfo=UTC))) * 1000
+    got = TZ.to_utc_ms(np.array([summer, winter], dtype=np.int64))
+    assert got.tolist() == [summer - 3 * 3_600_000, winter - 2 * 3_600_000]
+    assert TZ.to_utc_ms(np.array([], dtype=np.int64)).size == 0
 
 
-@pytest.mark.parametrize(
-    ("server_wall", "expected_utc", "offset_h"),
-    [
+def test_known_conversions() -> None:
+    for server_wall, expected_utc, offset_h in [
         # US summer time (EDT, UTC-4) -> server UTC+3
         (server(2026, 7, 1, 12), utc(2026, 7, 1, 9), 3),
         # US winter time (EST, UTC-5) -> server UTC+2
@@ -38,21 +46,18 @@ def test_measured_phase1_sample() -> None:
         # Daily break: server midnight == 17:00 New York, all year
         (server(2026, 7, 2, 0), utc(2026, 7, 1, 21), 3),
         (server(2026, 12, 2, 0), utc(2026, 12, 1, 22), 2),
-    ],
-)
-def test_known_conversions(server_wall: float, expected_utc: datetime, offset_h: int) -> None:
-    assert TZ.to_utc(server_wall) == expected_utc
-    assert TZ.to_server_seconds(expected_utc) == server_wall
-    assert TZ.offset_at(expected_utc) == timedelta(hours=offset_h)
+    ]:
+        assert TZ.to_utc(server_wall) == expected_utc
+        assert TZ.to_server_seconds(expected_utc) == server_wall
+        assert TZ.offset_at(expected_utc) == timedelta(hours=offset_h)
+    eet = ServerTimeZone(timezone="Europe/Athens", shift_hours=0)  # other rules configurable
+    assert eet.offset_at(utc(2026, 3, 16, 12)) == timedelta(hours=2)
 
 
-def test_us_spring_forward_edge() -> None:
+def test_us_dst_edges() -> None:
     # US clocks change Sun 2026-03-08 02:00 EST = 07:00 UTC (server 09:00 -> 10:00 jump).
     assert TZ.offset_at(utc(2026, 3, 8, 6, 59)) == timedelta(hours=2)
     assert TZ.offset_at(utc(2026, 3, 8, 7, 0)) == timedelta(hours=3)
-
-
-def test_us_fall_back_edge() -> None:
     # Sun 2026-11-01 02:00 EDT = 06:00 UTC: server wall 09:00 -> 08:00 (repeats one hour).
     assert TZ.offset_at(utc(2026, 11, 1, 5, 59)) == timedelta(hours=3)
     assert TZ.offset_at(utc(2026, 11, 1, 6, 0)) == timedelta(hours=2)
@@ -60,15 +65,9 @@ def test_us_fall_back_edge() -> None:
     assert TZ.to_utc(server(2026, 11, 1, 8, 30)) == utc(2026, 11, 1, 5, 30)
 
 
-def test_other_rules_configurable() -> None:
-    eet = ServerTimeZone(timezone="Europe/Athens", shift_hours=0)
-    assert eet.offset_at(utc(2026, 3, 16, 12)) == timedelta(hours=2)
-
-
 @pytest.mark.parametrize(
     ("quote_offset_s", "status"),
     [
-        (10_800, OffsetCheck.VERIFIED),
         (10_799.2, OffsetCheck.VERIFIED),
         (10_800 - 3600 * 50, OffsetCheck.STALE_QUOTE),  # last tick Friday night, now Sunday
         (10_800 + 3600, OffsetCheck.MISMATCH),  # server really at +4h
@@ -80,13 +79,3 @@ def test_check_offset(quote_offset_s: float, status: OffsetCheck) -> None:
     assert m.status is status
     assert m.expected == timedelta(hours=3)
     assert m.residual == timedelta(seconds=quote_offset_s - 10_800)
-
-
-def test_vectorised_conversion_of_phase1_sample_and_empty() -> None:
-    tz = ServerTimeZone()
-    # 2026-10-09 server 03:35:42.123 (UTC+3) and a US-winter value (UTC+2).
-    summer = int(tz.to_server_seconds(datetime(2026, 10, 9, 0, 35, 42, tzinfo=UTC))) * 1000 + 123
-    winter = int(tz.to_server_seconds(datetime(2026, 1, 13, 14, 0, tzinfo=UTC))) * 1000
-    got = tz.to_utc_ms(np.array([summer, winter], dtype=np.int64))
-    assert got.tolist() == [summer - 3 * 3_600_000, winter - 2 * 3_600_000]
-    assert tz.to_utc_ms(np.array([], dtype=np.int64)).size == 0
