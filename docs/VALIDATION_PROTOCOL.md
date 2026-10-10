@@ -51,6 +51,9 @@ Reviewer condition 2026-10-10; `docs/STRATEGY_SPEC_TEMPLATE.md` §8a.
 - A setup whose stop is above the cap emits no signal. The stop is never clamped, shortened
   or moved to fit.
 - Each candidate report shows `stop_above_cap`, the number of setups rejected for this reason.
+  Strategies also report `data_gap`: the number of decision times at which a bar the rules
+  may read at that time is missing (each strategy defines its read set; trend_pullback in
+  its spec section 16). It is diagnostic only.
   It sits next to the trades taken and the risk engine's rejections, which are counted
   separately (`sized volume < volume_min` and the other gates).
 

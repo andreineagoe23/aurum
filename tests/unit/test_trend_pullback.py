@@ -96,6 +96,13 @@ def ema(closes: list[float], end: int, period: int) -> float:
     return value
 
 
+def without(bars: BarSeries, *closes: datetime) -> BarSeries:
+    """``bars`` with the bars closing at ``closes`` removed (a data gap)."""
+    keep = ~np.isin(bars.close_time, [to_ms(t) for t in closes])
+    fields = ("open_time", "close_time", "open", "high", "low", "close", "spread_min", "tick_count")
+    return BarSeries(timeframe=bars.timeframe, **{f: getattr(bars, f)[keep] for f in fields})
+
+
 def mirror(bars: BarSeries) -> BarSeries:
     """The same market reflected around 2000: every long rule becomes the short one."""
     return BarSeries(
@@ -188,14 +195,7 @@ def test_m15_signal_and_rule_boundaries() -> None:
     assert at(touch_equal, strategy(), T0) is not None, "low(b3) == EMA20(b3) counts"
 
     # A missing bar inside b0..b7 is a data gap: no setup, counted.
-    gap = series(Timeframe.M15, closes, T0)
-    keep = np.ones(len(gap), dtype=bool)
-    keep[-6] = False  # b5 missing
-    gapped = BarSeries(
-        timeframe=Timeframe.M15,
-        **{f: getattr(gap, f)[keep] for f in ("open_time", "close_time", "open", "high", "low",
-                                               "close", "spread_min", "tick_count")},
-    )  # fmt: skip
+    gapped = without(series(Timeframe.M15, closes, T0), T0 - timedelta(minutes=75))  # b5
     s = strategy()
     assert at(store(gapped), s, T0) is None
     assert at(store(base), s, T0 + timedelta(minutes=15)) is None  # no bar closing at T
@@ -232,6 +232,7 @@ def m5_store(
     *,
     m5_lows: dict[str, float] | None = None,
     h1_extra: list[float] | None = None,
+    drop: dict[Timeframe, list[datetime]] | None = None,
 ) -> BarStore:
     """M5 bars: flat history, the 14:15 bar at 2009 (high 2009.50), then ``m5_closes`` keyed
     "HH:MM" (high = close + 0.50, low = close - 1.00 unless in ``m5_lows``)."""
@@ -246,7 +247,12 @@ def m5_store(
     m15 = series(
         Timeframe.M15, m15_closes(m15_after), T0 + timedelta(minutes=15 * len(m15_after or []))
     )
-    return BarStore({Timeframe.H1: h1(h1_extra), Timeframe.M15: m15, Timeframe.M5: m5})
+    gone = drop or {}
+    return BarStore({
+        Timeframe.H1: h1(h1_extra),
+        Timeframe.M15: without(m15, *gone.get(Timeframe.M15, [])),
+        Timeframe.M5: without(m5, *gone.get(Timeframe.M5, [])),
+    })  # fmt: skip
 
 
 def m5_times(*hhmm: str) -> list[datetime]:
@@ -344,3 +350,37 @@ def test_invalidation_only_on_completed_h1_closes_after_the_decision() -> None:
         view = BarStore({Timeframe.H1: hourly}).view_at(now)
         # A fresh instance per market: indicator values are cached per bar of one market.
         assert (strategy().invalidation(view, pos, sig) is not None) is invalid, now
+
+
+def test_data_gap_counts_decision_times_with_a_missing_read_bar() -> None:
+    """One data_gap per decision time T at which a bar the variant may read at T is missing
+    (m15: M15 closes T-105..T; m5: M5 closes T-30..T and M15 closes T-135..T). Diagnostics
+    only: the frozen rules are unchanged."""
+    m15_store = BarStore(
+        {Timeframe.H1: h1(), Timeframe.M15: series(Timeframe.M15, m15_closes(), T0)}
+    )
+    full = {"14:20": 2006.0, "14:25": 2007.0, "14:30": 2008.0}
+    later = [2002.0, 2002.0]
+    t20, t25, t30 = m5_times("14:20", "14:25", "14:30")
+    tf15, tf5 = Timeframe.M15, Timeframe.M5
+    cases: list[tuple[str, BarStore, str, datetime, int]] = [
+        ("m15, complete", m15_store, "m15", T0, 0),
+        ("m15, b0 missing at T", m15_store, "m15", T0 + timedelta(minutes=15), 1),
+        ("m15, b7 missing", BarStore({Timeframe.H1: h1(), tf15: without(
+            series(tf15, m15_closes(), T0), T0 - timedelta(minutes=105))}), "m15", T0, 1),
+        ("m5, complete", m5_store(full, later), "m5", t25, 0),
+        ("m5, setup candidate's close missing", m5_store(full, later, drop={tf15: [T0]}), "m5",
+            t25, 1),
+        ("m5, candidate window not consecutive", m5_store(full, later,
+            drop={tf15: [T0 - timedelta(minutes=75)]}), "m5", t25, 1),
+        ("m5, oldest window bar missing", m5_store(full, later,
+            drop={tf15: [T0 - timedelta(minutes=120)]}), "m5", t25, 1),
+        ("m5, m0's predecessor missing", m5_store(full, later, drop={tf5: [t20]}), "m5", t25, 1),
+        ("m5, a re-read bar's predecessor missing", m5_store(full, later, drop={tf5: [t20]}),
+            "m5", t30, 1),
+        ("m5, no bar closes at T", m5_store(full, later), "m5", t30 + timedelta(minutes=5), 1),
+    ]  # fmt: skip
+    for name, store, variant, now, expected in cases:
+        s = strategy(variant)
+        at(store, s, now)
+        assert s.diagnostics()["data_gap"] == expected, name

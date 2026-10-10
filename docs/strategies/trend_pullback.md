@@ -400,7 +400,10 @@ Fixed (not searched; a change is a version bump):
   count, holding times;
 - spread / commission / slippage attribution;
 - splits by fold, year, month, session and direction;
-- `stop_below_minimum`, `stop_above_cap`, `data_gap` and risk-rejection counts;
+- `stop_below_minimum`, `stop_above_cap`, `data_gap` and risk-rejection counts. One
+  `data_gap` = a decision time T at which a bar the variant may read at T is missing (m15: the
+  M15 closes T−105 min … T; m5: the M5 closes T−30 … T and the M15 closes T−135 … T).
+  Diagnostic only; a gap changes no rule (clarified 2026-10-10, see the change log);
 - the Phase 3b summary (worst/best replay);
 - the total trial count;
 - the null baseline (`reference_fixed_time`, docs/STATUS.md) side by side.
@@ -534,3 +537,4 @@ why version 0.1.0 tied the hold window to the 8 swing bars.
 | 0.1.0 | 2026-10-10 | Initial draft (6f371d2) | Phase 5 start |
 | 0.2.0 | 2026-10-10 | Exact time/window/equality semantics; float-safe price-grid rounding; searched parameters by name (`EMA_H1`, `stop_atr_mult`, `target_r`); setup bars must be decision times; same-instant replacement rule; bar-only fill rule (ADR-0009 §4); warm-up 504 H1 / 509 M15 / 3 M5; D6 (a) fully specified; measurement definitions for every threshold (closed-trade drawdown, entry-time slicing, per-side and per-session minimums, neighbour counts 6/5/4/3, exact DSR formula); trace lists all 8 lows; consecutive-bar rule (`data_gap`); m5 window boundaries, session truncation, replacement, one use, stateless derivation; m5 swing includes the M5 bars since the last M15 close; fill vs `ref`; invalidation only on completed H1 bars; exit precedence delegated to the simulator; signal priority; D3 wording; D6 (timeout start); sealing conditions; trial definition; D5 thresholds expanded (aggregate P&L, drawdown, session, neighbourhood rule, DSR, sealed untouched) | Review of 0.1.0 (owner's reviewer, 2026-10-10) and an independent read-only audit of the 0.2.0 text; still draft, no results seen |
 | 0.2.0 (approved) | 2026-10-10 | Approval recorded; D6 = (b); timeout wording "signal-to-exit"; status, header and section 0. **No rule changed.** | Owner approval of `b9baf4c` |
+| 0.2.0 (clarified) | 2026-10-10 | Defines the `data_gap` diagnostic (section 16, Reported): one per decision time with a missing bar in the variant's read set. **No rule changed.** | Implementation review (2026-10-10) |

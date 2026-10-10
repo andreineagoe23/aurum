@@ -31,9 +31,10 @@ Rules are stated for a long; a short mirrors every comparison.
   **Timeout (§10):** ``max_hold`` 180 min from ``Signal.time``.
 * **Invalidation (§11):** an H1 bar closing after the decision with ``close < EMA_H1``.
 
-``diagnostics()`` counts would-be signals refused for ``stop_below_minimum`` /
-``stop_above_cap`` and decision times skipped for a ``data_gap`` (§8, §16 reporting). The
-counts are diagnostics only; no decision reads them.
+``diagnostics()`` counts would-be signals refused for ``stop_below_minimum`` and
+``stop_above_cap``, and ``data_gap`` decision times (one per T at which a bar the rules may
+read at T is missing; ``_read_set_incomplete``). The counts are diagnostics only; no decision
+reads them, and a gap never adds or removes a signal beyond what the rules already do.
 """
 
 import math
@@ -138,9 +139,25 @@ class TrendPullback:
     def on_bar(self, view: MarketView) -> Signal | None:
         if not self._entries_allowed(view.now):  # §12 (the engine also only calls then)
             return None
+        if self._read_set_incomplete(view):  # diagnostics only; decides nothing
+            self._rejections["data_gap"] += 1
         if self._tf is Timeframe.M15:
             return self._on_m15(view)
         return self._on_m5(view)
+
+    def _read_set_incomplete(self, view: MarketView) -> bool:
+        """One ``data_gap`` = a decision time T at which some bar the variant's rules may read
+        at T is missing. m15: the M15 closes T-105 min .. T (b7..b0). m5: the M5 closes
+        T-30 .. T (m0, its predecessor, every window bar the reconstruction re-reads and its
+        predecessor) and every M15 close T-135 .. T (setup candidates in [T-30, T-5] with
+        their 8-bar windows, and the swing window at T)."""
+        now = to_ms(view.now)
+        if self._tf is Timeframe.M15:
+            return _missing(view.bars(Timeframe.M15), now - (SWING_BARS - 1) * M15_MS, now, M15_MS)
+        span_m15 = TRIGGER_WINDOW_MS + (SWING_BARS - 1) * M15_MS
+        return _missing(view.bars(Timeframe.M5), now - TRIGGER_WINDOW_MS, now, M5_MS) or _missing(
+            view.bars(Timeframe.M15), now - span_m15, now, M15_MS
+        )
 
     def invalidation(self, view: MarketView, position: PositionState, signal: Signal) -> str | None:
         h1 = view.bars(Timeframe.H1)
@@ -160,11 +177,7 @@ class TrendPullback:
         now = to_ms(view.now)
         m15, h1 = view.bars(Timeframe.M15), view.bars(Timeframe.H1)
         i = len(m15) - 1
-        if i < 0 or int(m15.close_time[i]) != now:
-            self._rejections["data_gap"] += 1
-            return None
-        if not self._consecutive(m15, i):
-            self._rejections["data_gap"] += 1
+        if i < 0 or int(m15.close_time[i]) != now or not self._consecutive(m15, i):
             return None
         side = self._setup(m15, i, h1)
         if side is None:
@@ -191,7 +204,6 @@ class TrendPullback:
         m5, m15, h1 = view.bars(Timeframe.M5), view.bars(Timeframe.M15), view.bars(Timeframe.H1)
         k = len(m5) - 1
         if k < 1 or int(m5.close_time[k]) != now:
-            self._rejections["data_gap"] += 1
             return None
         armed = self._armed_setup(m15, h1, now)
         if armed is None:
@@ -205,7 +217,6 @@ class TrendPullback:
         if self._expired(m5, k, m15, s, side):
             return None
         if int(m5.open_time[k - 1]) != int(m5.open_time[k]) - M5_MS:
-            self._rejections["data_gap"] += 1
             return None
         if not self._triggers(m5, k, m15, s, side, h1):
             return None
@@ -284,8 +295,6 @@ class TrendPullback:
         for s in range(hi, -1, -1):
             if int(m15.close_time[s]) < now - TRIGGER_WINDOW_MS:
                 break
-            if int(m15.close_time[s]) == now - M5_MS and not self._consecutive(m15, s):
-                self._rejections["data_gap"] += 1  # counted once: at the first M5 close after it
             side = self._setup(m15, s, h1)
             if side is not None:
                 return s, side
@@ -391,3 +400,17 @@ class TrendPullback:
                 )
             )
         return self._cache[key]
+
+
+def _missing(bars: BarSeries, first_ms: int, last_ms: int, step_ms: int) -> bool:
+    """Whether any bar that should close on the ``step_ms`` grid in [first_ms, last_ms] is
+    absent (closes are multiples of the timeframe)."""
+    lo = -(-first_ms // step_ms) * step_ms
+    hi = last_ms // step_ms * step_ms
+    if hi < lo:
+        return False
+    expected = (hi - lo) // step_ms + 1
+    present = int(np.searchsorted(bars.close_time, hi, side="right")) - int(
+        np.searchsorted(bars.close_time, lo, side="left")
+    )
+    return present < expected
