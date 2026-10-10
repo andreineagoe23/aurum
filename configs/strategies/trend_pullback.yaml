@@ -1,8 +1,14 @@
-# Phase 5. Parameters are filled in only after docs/strategies/trend_pullback.md (from the spec template) exists.
+# Phase 5 family 1. Spec: docs/strategies/trend_pullback.md, 0.2.0, approved and pre-registered
+# 2026-10-10 (text b9baf4c). Fixed rules are code constants (aurum.strategies.trend_pullback);
+# only the declared grid is searched: h1_ema {30, 50, 80} x stop_atr_mult {0.25, 0.5, 1.0} x
+# target_r {1.0, 1.5, 2.0}, per variant: 54 trials. The values below are the spec's defaults.
 name: trend_pullback
 family: trend_pullback
 enabled: false
 variants: [m15, m5]
 sessions: [london_morning, ldn_ny_overlap]
-spec: null
-params: {}
+spec: docs/strategies/trend_pullback.md
+params:
+  h1_ema: 50
+  stop_atr_mult: 0.5
+  target_r: 1.5

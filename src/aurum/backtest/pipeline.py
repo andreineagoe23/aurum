@@ -88,6 +88,19 @@ def execute(
         if request.slippage_points is None
         else request.slippage_points
     )
+    hours = MarketHours(cfg.data.market)
+    calendar = TradingCalendar(cfg.sessions, hours)
+    start = calendar.local_to_utc(request.first, datetime.min.time())
+    # Built (validated) before the sealed check, so a config error cannot spend the one-time
+    # opening; building reads no data.
+    strategy = build_strategy(
+        cfg.strategies[request.strategy],
+        variant=request.variant,
+        symbol=symbol,
+        point=spec.point,
+        entries_allowed=lambda t: calendar.state_at(t).entries_allowed,
+        stops_level_points=spec.stops_level_points,
+    )
     code_version = current_code_version(settings.project_root)
     cfg_hash = config_hash(cfg)
     access = resolve_access(
@@ -98,12 +111,6 @@ def execute(
         code_version=code_version,
         clock=clock,
     )
-    strategy = build_strategy(
-        cfg.strategies[request.strategy], variant=request.variant, symbol=symbol, point=spec.point
-    )
-    hours = MarketHours(cfg.data.market)
-    calendar = TradingCalendar(cfg.sessions, hours)
-    start = calendar.local_to_utc(request.first, datetime.min.time())
     layout = DataLayout(settings.data_dir)
     loaded = load_market(
         layout,
@@ -173,6 +180,7 @@ def execute(
         "open_at_end": result.open_at_end,
         "tick_days": len(loaded.tick_days),
         "bar_days": len(loaded.bar_days),
+        **strategy.diagnostics(),
     }
     params: dict[str, Any] = {
         "strategy_params": cfg.strategies[request.strategy].params,

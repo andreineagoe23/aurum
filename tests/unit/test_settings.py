@@ -130,7 +130,7 @@ def test_unquoted_yaml_time_is_rejected_not_misread(config_dir: Path) -> None:
 
 
 def test_strategy_config_errors(config_dir: Path) -> None:
-    path = config_dir / "strategies" / "trend_pullback.yaml"
+    path = config_dir / "strategies" / "opening_range_breakout.yaml"  # no spec yet
     original = path.read_text()
     for changes, match in [
         ({"enabled": True}, "without a spec"),
@@ -138,7 +138,7 @@ def test_strategy_config_errors(config_dir: Path) -> None:
         ({"name": "other_name"}, "declares name"),
     ]:
         path.write_text(original)
-        edit(config_dir, "strategies/trend_pullback", **changes)
+        edit(config_dir, "strategies/opening_range_breakout", **changes)
         with pytest.raises(ConfigError, match=match):
             load_config(config_dir)
 

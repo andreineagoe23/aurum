@@ -32,6 +32,10 @@ class Strategy(Protocol):
         by this count (not by calendar days); warm-up bars never produce a decision."""
         ...
 
+    def diagnostics(self) -> Mapping[str, int]:
+        """Counts the run reports but no decision reads (e.g. setups refused for their stop)."""
+        ...
+
     def on_bar(self, view: MarketView) -> Signal | None:
         """A new entry proposal at ``view.now``, or None. ``Signal.time`` must be ``view.now``."""
         ...

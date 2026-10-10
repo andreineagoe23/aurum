@@ -124,14 +124,14 @@ _Last updated: 2026-10-10._
    D1 sealed 2025-10-01 … 2026-10-08, D2 cap 2,000 points, D3 minimum 500 points, D4 54
    trials, D5 section-16 thresholds, D6 (b) timeout from `Signal.time`. The owner approved
    the reported specification, not a line-by-line review of the diff.
-2. **Sealed-period protection**: config boundaries; backtests refuse the range; an explicit
+2. ~~**Sealed-period protection**~~ (552beed): config boundaries; backtests refuse the range; an explicit
    `--open-sealed` with a journal of when, why and by whom; opened once; exact-tick subset
    reported separately.
-3. **Warm-up by bar count**: 504 H1, 509 M15 and 3 M5 completed bars; no activity in warm-up.
-4. **Timeout semantics confirmed**: signal-to-exit, existing engine behaviour; docs + a
+3. ~~**Warm-up by bar count**~~ (c6b0c86): 504 H1, 509 M15 and 3 M5 completed bars; no activity in warm-up.
+4. ~~**Timeout semantics confirmed**~~ (1b23791): signal-to-exit, existing engine behaviour; docs + a
    regression assertion.
-5. **Strategy rules**, exactly as specified: no parameter change, no extra filter.
-6. **Deterministic rule tests**: timestamps, equality boundaries, setup replacement, gaps,
+5. ~~**Strategy rules**~~, exactly as specified: no parameter change, no extra filter.
+6. ~~**Deterministic rule tests**~~: timestamps, equality boundaries, setup replacement, gaps,
    stop bounds, restart restoration.
 7. **Run the 54 development trials.** Every trial goes in the ledger, including failures and
    rejected-setup counts. **Claude stops for review before this first P&L-producing step.**

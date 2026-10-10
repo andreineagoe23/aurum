@@ -88,6 +88,9 @@ class FixedTimeReference:
     def warmup_bars(self) -> Mapping[Timeframe, int]:
         return {}  # decides from the newest bar only
 
+    def diagnostics(self) -> Mapping[str, int]:
+        return {}
+
     def on_bar(self, view: MarketView) -> Signal | None:
         now = view.now
         entry = self._entries.get(now.time().replace(second=0, microsecond=0))
