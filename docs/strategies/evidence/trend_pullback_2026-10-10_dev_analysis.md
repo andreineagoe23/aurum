@@ -4,10 +4,14 @@ Generated read-only by `scripts/trend_pullback_dev_analysis.py` from the existin
 (no simulation). Rules: spec section 16 as amended by A1. Evidence package:
 `trend_pullback_2026-10-10_dev_batch.md`.
 
-**Status of this document.** The pipeline computed simulated P&L and summary metrics for
-every trial when it ran. This is the **post-batch assessment** against the registered
-rules. It does **not** select the final candidate (the frozen configuration for Phase 6
-is not determined here), and it does not use full-period P&L to choose anything.
+**Status: closed (reviewer conclusion 2026-10-11, section 6).** trend_pullback 0.2.0 +
+amendment A1 does not qualify for progression under the registered gates: m15 and m5 are
+both rejected and no candidate goes to the sealed test.
+
+The pipeline computed simulated P&L and summary metrics for every trial when it ran. This
+is the **post-batch assessment** against the registered rules. It selects no final
+candidate (no frozen configuration for Phase 6) and uses no full-period P&L to choose
+anything.
 
 Definitions used (spec section 16):
 
@@ -305,7 +309,7 @@ Monthly (entry month, UTC):
 | 10 neighbourhood | not evaluated (frozen configuration not selected); informational below |
 | 11 intra-bar (Phase 3b) | not evaluated (best-case replay not authorised); worst-case flagged 2 of 698 = 0.29% |
 | 12 DSR ≥ 0.95 | FAIL: 0.0175 |
-| 13 sealed untouched | pass: no trend_pullback run reads 2025-10-01 or later; 0 openings |
+| 13 sealed untouched | candidate evidence: 0 trend_pullback runs read 2025-10-01 or later; sealed openings 0, parity accesses 0. Literal ledger-wide condition: 10 historical reference_fixed_time exceptions (section 5) |
 
 Neighbourhood (informational, gate 10 not evaluated): (80, 1, 2): 1 of 3 neighbours > 0 in folds 1–4 (needs 2: not met); (50, 0.5, 1.5): 5 of 6 neighbours > 0 in folds 1–4 (needs 4: met); (30, 0.5, 1.5): 4 of 5 neighbours > 0 in folds 1–4 (needs 4: met); (30, 0.25, 2): 3 of 3 neighbours > 0 in folds 1–4 (needs 2: met).
 
@@ -431,7 +435,7 @@ Monthly (entry month, UTC):
 | 10 neighbourhood | not evaluated (frozen configuration not selected); informational below |
 | 11 intra-bar (Phase 3b) | not evaluated (best-case replay not authorised); worst-case flagged 2 of 685 = 0.29% |
 | 12 DSR ≥ 0.95 | FAIL: 0.3434 |
-| 13 sealed untouched | pass: no trend_pullback run reads 2025-10-01 or later; 0 openings |
+| 13 sealed untouched | candidate evidence: 0 trend_pullback runs read 2025-10-01 or later; sealed openings 0, parity accesses 0. Literal ledger-wide condition: 10 historical reference_fixed_time exceptions (section 5) |
 
 Neighbourhood (informational, gate 10 not evaluated): (80, 0.5, 1.5): 5 of 5 neighbours > 0 in folds 1–4 (needs 4: met); (50, 0.25, 1.5): 5 of 5 neighbours > 0 in folds 1–4 (needs 4: met); (80, 0.25, 2): 3 of 3 neighbours > 0 in folds 1–4 (needs 2: met); (50, 0.5, 1.5): 6 of 6 neighbours > 0 in folds 1–4 (needs 4: met).
 
@@ -453,16 +457,69 @@ DSR inputs: SR 0.03766 per day, T 1032 market days, skew 0.8132, kurtosis 5.8931
 | 10 neighbourhood | not evaluated (frozen configuration not selected); informational below | not evaluated (frozen configuration not selected); informational below |
 | 11 intra-bar (Phase 3b) | not evaluated (best-case replay not authorised); worst-case flagged 2 of 698 = 0.29% | not evaluated (best-case replay not authorised); worst-case flagged 2 of 685 = 0.29% |
 | 12 DSR ≥ 0.95 | FAIL: 0.0175 | FAIL: 0.3434 |
-| 13 sealed untouched | pass: no trend_pullback run reads 2025-10-01 or later; 0 openings | pass: no trend_pullback run reads 2025-10-01 or later; 0 openings |
+| 13 sealed untouched | candidate evidence: 0 trend_pullback runs read 2025-10-01 or later; sealed openings 0, parity accesses 0. Literal ledger-wide condition: 10 historical reference_fixed_time exceptions (section 5) | candidate evidence: 0 trend_pullback runs read 2025-10-01 or later; sealed openings 0, parity accesses 0. Literal ledger-wide condition: 10 historical reference_fixed_time exceptions (section 5) |
 
-- **m15:** **fails** registered gate(s) 2, 3, 4, 7, 8, 9, 12 — under section 16 this variant cannot pass, whatever the unevaluated gates show.
-- **m5:** **fails** registered gate(s) 9, 12 — under section 16 this variant cannot pass, whatever the unevaluated gates show.
+- **m15:** **rejected**: fails registered gate(s) 2, 3, 4, 7, 8, 9, 12. Under section 16 this variant cannot pass, whatever the unevaluated gates show.
+- **m5:** **rejected**: fails registered gate(s) 9, 12. Under section 16 this variant cannot pass, whatever the unevaluated gates show.
 
-Not evaluated here (not authorised): gate 5 (spread ×1.5 re-run), gate 11 (best-case
-intra-bar replay / Phase 3b), gate 10 on the frozen configuration (final candidate
-selection), the null-baseline rerun over 2020-12-15 … 2025-09-30. The existing null
+Not evaluated: gate 5 (spread ×1.5 re-run), gate 11 (best-case intra-bar replay /
+Phase 3b) and gate 10 on the frozen configuration (final candidate selection). Evaluation
+stopped after the mandatory failures; these are not run for this version. The
+null-baseline rerun over 2020-12-15 … 2025-09-30 was not run either. The existing null
 baseline (`reference_fixed_time`, 2020-11-12 … 2026-10-08, −381.76 USD, docs/STATUS.md)
 covers another period, including the sealed one, so it is not shown side by side; its
 trades were not read.
 - Total trial count: 54 (the whole declared search; N for the DSR).
 - Trades exiting on a date outside the market calendar in folds 1–4 (all 54 runs): 0.
+
+## 5. Sealed period (gate 13)
+
+Gate 13 reads "the ledger shows no run whose range touches it". The candidate-specific
+evidence and the literal ledger-wide condition are reported apart.
+
+**Candidate-specific evidence (trend_pullback 0.2.0 + A1):**
+
+- trend_pullback trials in the ledger: 54, latest `data_end`
+  2025-09-30T23:00:00+00:00 (London midnight of 2025-10-01). trend_pullback trials whose
+  `data_end` is after 2025-10-01 00:00 UTC: 0.
+- No trend_pullback run evaluated the sealed period; the loader refuses sealed files
+  before reading them.
+- Sealed openings: 0. Parity accesses: 0. Both tables
+  are empty, so none happened during this batch.
+
+**Historical exceptions to the literal ledger-wide condition:**
+10 `reference_fixed_time` trials, recorded 2026-10-09 22:16 … 2026-10-10
+00:24 UTC, before the sealed period was defined (D1, approved with the spec text `b9baf4c`)
+and before the loader refused it (`552beed`, 2026-10-10 09:59 UTC). They stay in the
+ledger as recorded; no row is deleted or rewritten. The null-baseline runs in
+docs/STATUS.md are two of them (`tr_20261009T233343400292_605b5945`,
+`tr_20261010T002444363991_d57c1e14`).
+
+| trial | strategy | data_start | data_end |
+|---|---|---|---|
+| `tr_20261009T221629964444_3c472c4b` | reference_fixed_time | 2026-09-13 | 2026-10-08 |
+| `tr_20261009T221818318925_c0ca0f25` | reference_fixed_time | 2020-11-12 | 2026-10-08 |
+| `tr_20261009T221917546708_32c86b28` | reference_fixed_time | 2020-11-12 | 2026-10-08 |
+| `tr_20261009T222312946438_ded3b3af` | reference_fixed_time | 2026-09-13 | 2026-10-08 |
+| `tr_20261009T231143063137_524c5051` | reference_fixed_time | 2026-09-13 | 2026-10-08 |
+| `tr_20261009T231320639210_7398d837` | reference_fixed_time | 2020-11-12 | 2026-10-08 |
+| `tr_20261009T232942016281_599861b8` | reference_fixed_time | 2026-09-13 | 2026-10-08 |
+| `tr_20261009T233213662768_daa59b30` | reference_fixed_time | 2020-11-12 | 2026-10-08 |
+| `tr_20261009T233343400292_605b5945` | reference_fixed_time | 2020-11-12 | 2026-10-08 |
+| `tr_20261010T002444363991_d57c1e14` | reference_fixed_time | 2020-11-12 | 2026-10-08 |
+
+## 6. Reviewer conclusion (2026-10-11)
+
+trend_pullback 0.2.0 + amendment A1 does **not** qualify for progression under the
+registered gates.
+
+- **m15 rejected:** fails gates 2, 3, 4, 7, 8, 9 and 12.
+- **m5 rejected:** the OOS simulation is profitable (+0.98 USD/trade, PF 1.119), but it
+  fails gates 9 (`london_morning` −0.08 USD/trade) and 12 (DSR 0.343 < 0.95).
+- **No candidate progresses to the sealed test.**
+- Gates 5, 10 and 11 remain not evaluated; evaluation stopped after the mandatory failures.
+- All 54 trials, attempts, run reports, hashes and ledger backups are preserved.
+- Not done, by decision: removing `london_morning`, lowering the DSR threshold, choosing
+  a different full-period winner, or rerunning this version to rescue it.
+- Any future revision of this family is a new, explicitly **post-results** hypothesis with
+  additional search accounting (these 54 trials count), not an unseen-data validation.

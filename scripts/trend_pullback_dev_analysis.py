@@ -570,7 +570,8 @@ def evidence(cfg: Any, runs: list[Run], extra: dict[str, Any]) -> str:
 # ------------------------------------------------------------------------------ analysis
 
 
-def analysis(cfg: Any, runs: list[Run]) -> str:
+def analysis(cfg: Any, runs: list[Run], extra: dict[str, Any]) -> str:
+    sealed = sealed_facts(extra["conn"])
     by = {(r.variant, r.point): r for r in runs}
     market = MarketHours(cfg.data.market)
     oos_days = market.trading_dates(OOS_FIRST, OOS_LAST)
@@ -672,10 +673,14 @@ def analysis(cfg: Any, runs: list[Run]) -> str:
         "(no simulation). Rules: spec section 16 as amended by A1. Evidence package:",
         f"`{STEM}_batch.md`.",
         "",
-        "**Status of this document.** The pipeline computed simulated P&L and summary metrics for",
-        "every trial when it ran. This is the **post-batch assessment** against the registered",
-        "rules. It does **not** select the final candidate (the frozen configuration for Phase 6",
-        "is not determined here), and it does not use full-period P&L to choose anything.",
+        "**Status: closed (reviewer conclusion 2026-10-11, section 6).** trend_pullback 0.2.0 +",
+        "amendment A1 does not qualify for progression under the registered gates: m15 and m5 are",
+        "both rejected and no candidate goes to the sealed test.",
+        "",
+        "The pipeline computed simulated P&L and summary metrics for every trial when it ran. This",
+        "is the **post-batch assessment** against the registered rules. It selects no final",
+        "candidate (no frozen configuration for Phase 6) and uses no full-period P&L to choose",
+        "anything.",
         "",
         "Definitions used (spec section 16):",
         "",
@@ -800,7 +805,7 @@ def analysis(cfg: Any, runs: list[Run]) -> str:
         out += [detail(oos, f"{v} concatenated OOS (folds 1–4)", FOLDS), ""]
         months = split_rows(oos, pl.col("signal_time").dt.strftime("%Y-%m"), "")
         out += ["Monthly (entry month, UTC):", "", table(SPLIT_HEADER, months), ""]
-        verdicts[v] = gates(v, oos, selected, by, trial_srs, daily)
+        verdicts[v] = gates(v, oos, selected, by, trial_srs, daily, sealed)
         out += [verdicts[v]["text"], ""]
 
     out += [
@@ -819,16 +824,84 @@ def analysis(cfg: Any, runs: list[Run]) -> str:
         out.append(f"- **{v}:** {verdicts[v]['overall']}")
     out += [
         "",
-        "Not evaluated here (not authorised): gate 5 (spread ×1.5 re-run), gate 11 (best-case",
-        "intra-bar replay / Phase 3b), gate 10 on the frozen configuration (final candidate",
-        "selection), the null-baseline rerun over 2020-12-15 … 2025-09-30. The existing null",
+        "Not evaluated: gate 5 (spread ×1.5 re-run), gate 11 (best-case intra-bar replay /",
+        "Phase 3b) and gate 10 on the frozen configuration (final candidate selection). Evaluation",
+        "stopped after the mandatory failures; these are not run for this version. The",
+        "null-baseline rerun over 2020-12-15 … 2025-09-30 was not run either. The existing null",
         "baseline (`reference_fixed_time`, 2020-11-12 … 2026-10-08, −381.76 USD, docs/STATUS.md)",
         "covers another period, including the sealed one, so it is not shown side by side; its",
         "trades were not read.",
         f"- Total trial count: {N_TRIALS} (the whole declared search; N for the DSR).",
         f"- Trades exiting on a date outside the market calendar in folds 1–4 (all 54 runs): {off_calendar}.",
+        "",
+        "## 5. Sealed period (gate 13)",
+        "",
+        'Gate 13 reads "the ledger shows no run whose range touches it". The candidate-specific',
+        "evidence and the literal ledger-wide condition are reported apart.",
+        "",
+        "**Candidate-specific evidence (trend_pullback 0.2.0 + A1):**",
+        "",
+        f"- trend_pullback trials in the ledger: {sealed['tp_trials']}, latest `data_end`",
+        f"  {sealed['tp_data_end']} (London midnight of 2025-10-01). trend_pullback trials whose",
+        f"  `data_end` is after {SEALED_FIRST.date()} 00:00 UTC: {sealed['tp_touching']}.",
+        "- No trend_pullback run evaluated the sealed period; the loader refuses sealed files",
+        "  before reading them.",
+        f"- Sealed openings: {sealed['openings']}. Parity accesses: {sealed['parity']}. Both tables",
+        "  are empty, so none happened during this batch.",
+        "",
+        "**Historical exceptions to the literal ledger-wide condition:**",
+        f"{len(sealed['touching'])} `reference_fixed_time` trials, recorded 2026-10-09 22:16 … 2026-10-10",
+        "00:24 UTC, before the sealed period was defined (D1, approved with the spec text `b9baf4c`)",
+        "and before the loader refused it (`552beed`, 2026-10-10 09:59 UTC). They stay in the",
+        "ledger as recorded; no row is deleted or rewritten. The null-baseline runs in",
+        "docs/STATUS.md are two of them (`tr_20261009T233343400292_605b5945`,",
+        "`tr_20261010T002444363991_d57c1e14`).",
+        "",
+        table(
+            ["trial", "strategy", "data_start", "data_end"],
+            [[f"`{t[0]}`", t[1], t[2][:10], t[3][:10]] for t in sealed["touching"]],
+        ),
+        "",
+        "## 6. Reviewer conclusion (2026-10-11)",
+        "",
+        "trend_pullback 0.2.0 + amendment A1 does **not** qualify for progression under the",
+        "registered gates.",
+        "",
+        "- **m15 rejected:** fails gates 2, 3, 4, 7, 8, 9 and 12.",
+        "- **m5 rejected:** the OOS simulation is profitable (+0.98 USD/trade, PF 1.119), but it",
+        "  fails gates 9 (`london_morning` −0.08 USD/trade) and 12 (DSR 0.343 < 0.95).",
+        "- **No candidate progresses to the sealed test.**",
+        "- Gates 5, 10 and 11 remain not evaluated; evaluation stopped after the mandatory failures.",
+        "- All 54 trials, attempts, run reports, hashes and ledger backups are preserved.",
+        "- Not done, by decision: removing `london_morning`, lowering the DSR threshold, choosing",
+        "  a different full-period winner, or rerunning this version to rescue it.",
+        "- Any future revision of this family is a new, explicitly **post-results** hypothesis with",
+        "  additional search accounting (these 54 trials count), not an unseen-data validation.",
     ]
     return "\n".join(out) + "\n"
+
+
+def sealed_facts(conn: sqlite3.Connection) -> dict[str, Any]:
+    """Gate 13 inputs from the ledger (read-only): the candidate's trials, the exceptions."""
+    first = SEALED_FIRST.isoformat()
+    tp = conn.execute(
+        "SELECT COUNT(*), MAX(data_end), SUM(data_end > ?) FROM trials"
+        " WHERE strategy = 'trend_pullback'",
+        (first,),
+    ).fetchone()
+    touching = conn.execute(
+        "SELECT trial_id, strategy, data_start, data_end FROM trials WHERE data_end > ?"
+        " ORDER BY seq",
+        (first,),
+    ).fetchall()
+    return {
+        "tp_trials": tp[0],
+        "tp_data_end": tp[1],
+        "tp_touching": tp[2],
+        "touching": touching,
+        "openings": conn.execute("SELECT COUNT(*) FROM sealed_openings").fetchone()[0],
+        "parity": conn.execute("SELECT COUNT(*) FROM parity_accesses").fetchone()[0],
+    }
 
 
 def gates(
@@ -838,6 +911,7 @@ def gates(
     by: dict[Any, Run],
     trial_srs: list[float],
     daily: Any,
+    sealed: dict[str, Any],
 ) -> dict[str, Any]:
     g: dict[str, str] = {}
     fold_ms = [metrics(in_window(oos, a, b)) for _, a, b in FOLDS]
@@ -920,11 +994,16 @@ def gates(
         / math.sqrt(1 - dsr.skew * dsr.sr + (dsr.kurtosis - 1) / 4 * dsr.sr**2)
     )
     g["12 DSR ≥ 0.95"] = f"{'pass' if dsr.dsr >= 0.95 else 'FAIL'}: {dsr.dsr:.4f}"
-    g["13 sealed untouched"] = "pass: no trend_pullback run reads 2025-10-01 or later; 0 openings"
+    g["13 sealed untouched"] = (
+        f"candidate evidence: {sealed['tp_touching']} trend_pullback runs read 2025-10-01 or "
+        f"later; sealed openings {sealed['openings']}, parity accesses {sealed['parity']}. "
+        f"Literal ledger-wide condition: {len(sealed['touching'])} historical "
+        "reference_fixed_time exceptions (section 5)"
+    )
     failed = [k for k, x in g.items() if x.startswith("FAIL")]
     overall = (
-        f"**fails** registered gate(s) {', '.join(k.split(' ')[0] for k in failed)} — "
-        "under section 16 this variant cannot pass, whatever the unevaluated gates show."
+        f"**rejected**: fails registered gate(s) {', '.join(k.split(' ')[0] for k in failed)}. "
+        "Under section 16 this variant cannot pass, whatever the unevaluated gates show."
         if failed
         else "meets every evaluated gate; it cannot pass until gates 5, 10 and 11 are evaluated."
     )
@@ -954,7 +1033,9 @@ def main() -> int:
     (OUT / f"{STEM}_batch.md").write_text(
         evidence(cfg, runs, extra), encoding="utf-8", newline="\n"
     )
-    (OUT / f"{STEM}_analysis.md").write_text(analysis(cfg, runs), encoding="utf-8", newline="\n")
+    (OUT / f"{STEM}_analysis.md").write_text(
+        analysis(cfg, runs, extra), encoding="utf-8", newline="\n"
+    )
     print("written to", OUT)
     return 0
 
