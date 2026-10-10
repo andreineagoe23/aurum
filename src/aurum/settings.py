@@ -381,6 +381,31 @@ class DataConfig(_Config):
 # ------------------------------------------------------------------------------ backtest.yaml
 
 
+StrategyFamily = Literal["trend_pullback", "opening_range_breakout", "vwap_reversion", "reference"]
+
+
+class SealedPeriodConfig(_Config):
+    """The sealed final-test period (owner decision D1, 2026-10-10). Research backtests never
+    read it unless opened once per strategy and variant, journalled (``aurum.backtest.sealed``)."""
+
+    first: date
+    last: date
+    exempt_families: list[StrategyFamily] = Field(default_factory=list)
+    """Families allowed to read it freely: only ``reference``, the no-edge simulator check
+    whose MT5 parity window lies inside the period and which is never selected."""
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.last < self.first:
+            raise ValueError("sealed_period: last is before first")
+        if set(self.exempt_families) - {"reference"}:
+            raise ValueError("sealed_period: only the reference family may be exempt")
+        return self
+
+    def overlaps(self, first: date, last: date) -> bool:
+        return first <= self.last and last >= self.first
+
+
 class BacktestConfig(_Config):
     """Simulator settings (Phase 3). Costs (commission, slippage) come from broker.yaml."""
 
@@ -399,6 +424,7 @@ class BacktestConfig(_Config):
     """Volume used by the Phase 3 risk stand-in (``FixedVolumeRisk``), until Phase 4 sizing."""
     warmup_days: int = Field(ge=0, le=60)
     """Calendar days of bars loaded before ``--from`` so strategies have history."""
+    sealed_period: SealedPeriodConfig
 
 
 # ------------------------------------------------------------------------------ strategies/
@@ -406,7 +432,7 @@ class BacktestConfig(_Config):
 
 class StrategyConfig(_Config):
     name: str = Field(pattern=r"^[a-z0-9_]+$")
-    family: Literal["trend_pullback", "opening_range_breakout", "vwap_reversion", "reference"]
+    family: StrategyFamily
     """``reference`` is the Phase 3 simulator check, not a research strategy."""
     enabled: bool = False
     variants: list[Literal["m15", "m5"]] = Field(min_length=1)

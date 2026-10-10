@@ -1,16 +1,20 @@
 """`aurum backtest run/report/compare` end to end on a synthetic data store."""
 
 import json
+import shutil
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import polars as pl
 import pytest
+import yaml
 from typer.testing import CliRunner
 
-from aurum.adapters.storage.layout import RunLayout, ledger_path
+from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
+from aurum.backtest.loading import load_market
 from aurum.backtest.storage import new_run_id, read_manifest, read_trades
 from aurum.cli import app
+from aurum.core.errors import SealedPeriodError
 from aurum.ledger.trial_ledger import TrialLedger
 from tests.sim_store import write_store
 
@@ -36,6 +40,11 @@ def run(*extra: str) -> str:
 
 def run_ids(runs: Path) -> list[str]:
     return RunLayout(runs).runs()
+
+
+def flat(output: str) -> str:
+    """CLI output with rich's line wrapping undone."""
+    return " ".join(output.split())
 
 
 def test_run_writes_outputs_and_records_a_trial(env: tuple[Path, Path]) -> None:
@@ -99,11 +108,11 @@ def test_unknown_strategy_or_run_fails_cleanly(env: tuple[Path, Path]) -> None:
     )
     assert bad.exit_code == 1
     assert "unknown strategy" in bad.output
-    phase5 = runner.invoke(
+    sealed = runner.invoke(
         app, ["backtest", "run", "trend_pullback", "--from", "2026-09-14", "--to", "2026-09-15"]
     )
-    assert phase5.exit_code == 1
-    assert "Phase 5" in phase5.output
+    assert sealed.exit_code == 1
+    assert "sealed final-test period" in flat(sealed.output)
     assert runner.invoke(app, ["backtest", "report", "missing"]).exit_code == 1
     bad_risk = runner.invoke(
         app,
@@ -121,6 +130,56 @@ def test_unknown_strategy_or_run_fails_cleanly(env: tuple[Path, Path]) -> None:
     )
     assert bad_risk.exit_code == 1
     assert "--risk must be policy or fixed" in bad_risk.output
+
+
+def test_sealed_period_is_refused_then_opened_once_and_journalled(
+    env: tuple[Path, Path], tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data, runs = env
+    # The reference strategy as if it were research (not exempt; its spec is set), with the
+    # synthetic tick day inside the sealed period.
+    configs = tmp_path / "configs"
+    shutil.copytree(repo_root / "configs", configs)
+    backtest = configs / "backtest.yaml"
+    cfg = yaml.safe_load(backtest.read_text(encoding="utf-8"))
+    cfg["sealed_period"] = {"first": "2026-09-15", "last": "2026-10-08", "exempt_families": []}
+    backtest.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    monkeypatch.setenv("AURUM_CONFIG_DIR", str(configs))
+    base = ["backtest", "run", "reference_fixed_time", "--from", "2026-09-14", "--to"]
+
+    refused = runner.invoke(app, [*base, "2026-09-15"])
+    assert refused.exit_code == 1
+    assert "overlaps the sealed final-test period" in flat(refused.output)
+    # A run ending the day before the seal must not even read its first day (the extra end day).
+    layout = DataLayout(data)
+    with pytest.raises(SealedPeriodError, match="refusing to read"):
+        load_market(
+            layout, "XAUUSD", point=0.01, first=BAR_DAY, last=BAR_DAY, warmup_days=0,
+            bar_spread_extra_points=2, sealed=(TICK_DAY, TICK_DAY),
+        )  # fmt: skip
+    clamped = runner.invoke(app, [*base, "2026-09-14"])
+    assert clamped.exit_code == 0, clamped.output
+    (run_id,) = run_ids(runs)
+    assert read_manifest(RunLayout(runs), run_id)["sealed_opened"] is False
+
+    no_reason = runner.invoke(app, [*base, "2026-09-15", "--open-sealed", "--by", "tester"])
+    assert no_reason.exit_code == 1
+    assert "needs who (--by) and why (--reason)" in flat(no_reason.output)
+    opened = [*base, "2026-09-15", "--open-sealed", "--by", "tester", "--reason", "frozen"]
+    first_open = runner.invoke(app, opened)
+    assert first_open.exit_code == 0, first_open.output
+    again = runner.invoke(app, opened)
+    assert again.exit_code == 1
+    assert "already opened" in flat(again.output)
+    with TrialLedger(ledger_path(data)) as ledger:
+        (opening,) = ledger.sealed_openings()
+        trials = ledger.list_trials()
+    assert (opening.strategy, opening.opened_by, opening.reason) == (
+        "reference_fixed_time",
+        "tester",
+        "frozen",
+    )
+    assert [t.sealed_test_opened for t in trials] == [False, True]
 
 
 def test_run_ids_sort_by_creation_within_one_second() -> None:

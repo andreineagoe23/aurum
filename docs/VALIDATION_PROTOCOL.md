@@ -56,10 +56,30 @@ Reviewer condition 2026-10-10; `docs/STRATEGY_SPEC_TEMPLATE.md` §8a.
 
 ## Sealed final test
 
-- The newest substantial period is sealed. Its date range is stored in config.
-- Tooling refuses to evaluate on it unless `--open-sealed` is passed. Opening is logged.
-- It is opened once, against the pre-registered threshold, after all tuning is finished.
-- TODO(Phase 6): choose range, config key, and enforcement in the data-access layer (not only the CLI).
+Owner decision D1, 2026-10-10; implemented in `aurum.backtest.sealed` and
+`aurum.backtest.loading`.
+
+- **Period:** 2025-10-01 … 2026-10-08, in `configs/backtest.yaml` `sealed_period` (required).
+- **Research backtests** (every family except `reference`):
+  - a request whose trading dates overlap the period is refused (`SealedPeriodError`);
+  - the loader refuses, **before reading**, any bar or tick file dated inside it, including
+    warm-up history and the extra end day;
+  - a run ending just before it loads data only up to the day before it.
+- **Opening:** `aurum backtest run … --open-sealed --by NAME --reason TEXT`, only for a
+  strategy whose config has an approved `spec:`.
+  - It is journalled in the trial ledger (`sealed_openings`, append-only) **before** any data
+    is read, so a crash still counts.
+  - It is allowed **once per strategy and variant** (UNIQUE), and the trial row gets
+    `sealed_test_opened = true`.
+  - A request that does not overlap the period cannot spend the opening.
+- **Exempt:** `reference` (the no-edge simulator check, never selected). Its MT5 tester
+  parity window, 2026-09-14 … 10-08, lies inside the period.
+- **When:** opened once, against the pre-registered threshold, after the candidate and its
+  parameters are frozen.
+- **Reporting:** the result shows the exact-tick subset (2026-06-26 onward, trades with
+  `entry_mode = ticks`) separately from the bar-only part.
+- **During Phase 5** nothing inside it is inspected: no descriptive counts, signals, trades or
+  P&L.
 
 ## Walk-forward
 

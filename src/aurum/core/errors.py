@@ -43,3 +43,8 @@ class LiveTradingBlockedError(SafetyViolationError):
 
 class LedgerError(AurumError):
     """The trial ledger rejected an operation."""
+
+
+class SealedPeriodError(AurumError):
+    """A research backtest would read the sealed final-test period without its one-time,
+    journalled opening (docs/VALIDATION_PROTOCOL.md)."""

@@ -11,7 +11,8 @@ import secrets
 import sqlite3
 import subprocess
 from collections.abc import Mapping
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
@@ -44,7 +45,41 @@ CREATE TRIGGER IF NOT EXISTS trials_no_update BEFORE UPDATE ON trials
 BEGIN SELECT RAISE(ABORT, 'trial ledger is append-only'); END;
 CREATE TRIGGER IF NOT EXISTS trials_no_delete BEFORE DELETE ON trials
 BEGIN SELECT RAISE(ABORT, 'trial ledger is append-only'); END;
+CREATE TABLE IF NOT EXISTS sealed_openings (
+    seq          INTEGER PRIMARY KEY AUTOINCREMENT,
+    opened_at    TEXT NOT NULL,
+    strategy     TEXT NOT NULL,
+    variant      TEXT NOT NULL,
+    opened_by    TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    first_day    TEXT NOT NULL,
+    last_day     TEXT NOT NULL,
+    config_hash  TEXT,
+    code_version TEXT,
+    UNIQUE (strategy, variant)
+);
+CREATE TRIGGER IF NOT EXISTS sealed_no_update BEFORE UPDATE ON sealed_openings
+BEGIN SELECT RAISE(ABORT, 'sealed openings are append-only'); END;
+CREATE TRIGGER IF NOT EXISTS sealed_no_delete BEFORE DELETE ON sealed_openings
+BEGIN SELECT RAISE(ABORT, 'sealed openings are append-only'); END;
 """
+
+
+@dataclass(frozen=True)
+class SealedOpening:
+    """One journalled opening of the sealed final-test period (at most one per strategy and
+    variant, enforced by a UNIQUE constraint)."""
+
+    opened_at: datetime
+    strategy: str
+    variant: str
+    opened_by: str
+    reason: str
+    first_day: date
+    last_day: date
+    config_hash: str | None
+    code_version: str | None
+
 
 _COLUMNS = (
     "trial_id, created_at, strategy, variant, params_json, data_start, data_end, metrics_json, "
@@ -176,6 +211,77 @@ class TrialLedger:
                 "SELECT COUNT(*) FROM trials WHERE strategy = ?", (strategy,)
             ).fetchone()
         return int(n)
+
+    def record_sealed_opening(
+        self,
+        *,
+        strategy: str,
+        variant: str,
+        opened_by: str,
+        reason: str,
+        first_day: date,
+        last_day: date,
+        config_hash: str | None,
+        code_version: str | None,
+    ) -> SealedOpening:
+        """Journal the one-time opening of the sealed period, before any of it is read."""
+        if not opened_by.strip() or not reason.strip():
+            raise LedgerError("opening the sealed period needs who (--by) and why (--reason)")
+        opening = SealedOpening(
+            opened_at=to_utc(self._clock.now()),
+            strategy=strategy,
+            variant=variant,
+            opened_by=opened_by.strip(),
+            reason=reason.strip(),
+            first_day=first_day,
+            last_day=last_day,
+            config_hash=config_hash,
+            code_version=code_version,
+        )
+        try:
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO sealed_openings (opened_at, strategy, variant, opened_by, reason,"
+                    " first_day, last_day, config_hash, code_version)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        opening.opened_at.isoformat(),
+                        strategy,
+                        variant,
+                        opening.opened_by,
+                        opening.reason,
+                        first_day.isoformat(),
+                        last_day.isoformat(),
+                        config_hash,
+                        code_version,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise LedgerError(
+                f"the sealed period was already opened for {strategy} {variant}; "
+                "it can be opened only once"
+            ) from exc
+        return opening
+
+    def sealed_openings(self) -> list[SealedOpening]:
+        cur = self._conn.execute(
+            "SELECT opened_at, strategy, variant, opened_by, reason, first_day, last_day,"
+            " config_hash, code_version FROM sealed_openings ORDER BY seq"
+        )
+        return [
+            SealedOpening(
+                opened_at=datetime.fromisoformat(r[0]),
+                strategy=r[1],
+                variant=r[2],
+                opened_by=r[3],
+                reason=r[4],
+                first_day=date.fromisoformat(r[5]),
+                last_day=date.fromisoformat(r[6]),
+                config_hash=r[7],
+                code_version=r[8],
+            )
+            for r in cur.fetchall()
+        ]
 
     def verify(self) -> list[str]:
         """Trial IDs whose stored content no longer matches its hash (empty = intact)."""

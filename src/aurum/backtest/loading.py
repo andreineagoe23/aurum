@@ -3,6 +3,9 @@
 * Canonical bars (M1/M5/M15/H1) for UTC days ``first - warmup_days .. last + 1``.
 * Normalized ticks only for days in ``first..last`` whose tick fidelity is ``exact``
   (``canonical_bars/days``, ADR-0007), loaded lazily one day at a time.
+* Research runs pass the sealed final-test period: any data file dated inside it is refused
+  **before it is read** (`SealedPeriodError`), whether it would serve warm-up, the period or
+  the extra end day.
 * A SHA-256 over every input file (path relative to the data dir + file hash), recorded in the
   run manifest so a result can be tied to the exact data it saw.
 """
@@ -18,6 +21,7 @@ import polars as pl
 from aurum.adapters.storage.layout import DataLayout, days_in
 from aurum.adapters.storage.parquet import read_parquet, sha256_file
 from aurum.backtest.market import HistoricalMarket, TickDay
+from aurum.core.errors import SealedPeriodError
 from aurum.core.timeframes import Timeframe
 from aurum.data.schemas import CANONICAL_BARS, DAY_SOURCES
 from aurum.features.view import BarSeries
@@ -69,18 +73,30 @@ def load_market(
     last: date,
     warmup_days: int,
     bar_spread_extra_points: int,
+    last_data_day: date | None = None,
+    sealed: tuple[date, date] | None = None,
 ) -> LoadedMarket:
+    """``last_data_day`` defaults to ``last + 1`` (UTC). ``sealed``: dates no file may come from."""
     if last < first:
         raise ValueError(f"empty period {first}..{last}")
-    lo, hi = first - timedelta(days=warmup_days), last + timedelta(days=1)
+    lo = first - timedelta(days=warmup_days)
+    hi = last + timedelta(days=1) if last_data_day is None else last_data_day
+
+    def allowed(paths: list[Path], days: list[date]) -> list[Path]:
+        if sealed is not None and any(sealed[0] <= d <= sealed[1] for d in days):
+            raise SealedPeriodError(
+                f"refusing to read {symbol} data dated in the sealed period "
+                f"{sealed[0]}..{sealed[1]} (requested {lo}..{hi})"
+            )
+        return paths
+
     files: list[Path] = []
     bars: dict[Timeframe, BarSeries] = {}
-    for tf in TIMEFRAMES:
-        paths = [
-            layout.canonical_bars(symbol, tf, d)
-            for d in days_in(layout.canonical_bars_dir(symbol, tf))
-            if lo <= d <= hi
-        ]
+    planned: dict[Timeframe, list[Path]] = {}
+    for tf in TIMEFRAMES:  # every date is checked before any file is read
+        wanted = [d for d in days_in(layout.canonical_bars_dir(symbol, tf)) if lo <= d <= hi]
+        planned[tf] = allowed([layout.canonical_bars(symbol, tf, d) for d in wanted], wanted)
+    for tf, paths in planned.items():
         if not paths:
             raise FileNotFoundError(f"no canonical {tf} bars for {symbol} in {lo}..{hi}")
         df = pl.read_parquet(paths).sort("open_time")
@@ -97,7 +113,9 @@ def load_market(
         for d in days.filter(pl.col("tick_fidelity") == "exact")["day"].to_list()
         if first <= d <= last and layout.normalized_ticks(symbol, d).is_file()
     }
-    files.extend(layout.normalized_ticks(symbol, d) for d in sorted(exact))
+    files.extend(
+        allowed([layout.normalized_ticks(symbol, d) for d in sorted(exact)], sorted(exact))
+    )
     m1_open = bars[Timeframe.M1].open_time.astype("datetime64[ms]").astype("datetime64[D]")
     m1_days = {d for d in np.unique(m1_open).astype(date).tolist() if first <= d <= last}
     market = HistoricalMarket(

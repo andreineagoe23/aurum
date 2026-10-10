@@ -36,8 +36,8 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `strategies` | `base` contract (Signals only), `reference.FixedTimeReference` (parity/null strategy), `registry` (config → strategy) |
 | `risk` | `base` (`RiskEngine`, `RiskContext`), `policy.PolicyRiskEngine` (sizing + every gate, ADR-0010), `fixed.FixedVolumeRisk` (tester parity only) |
 | `execution` | `engine.Engine` (the per-step decision loop for every mode), `orders.OrderManager` (only send path), `intents` (SQLite intent store), `reconcile`, `killswitch` (ADR-0011) |
-| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (config → run → ledger), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` |
-| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed rows |
+| `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (config → run → ledger), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` (refuses sealed-period files before reading), `sealed` (sealed final-test guard and its one-time journalled opening) |
+| `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed rows; `sealed_openings` journal (once per strategy and variant) |
 | `monitoring` | `logging` (structlog JSON, secret redaction), `doctor`, `watchdog` (heartbeat → kill switch) |
 | `apps` | `collector` (live ticks, Windows); `shadow`, `trader` are Phase 7/8 placeholders |
 | `validation` | `phase3b` (Phase 3b trigger on a candidate's worst/best intra-bar runs, ADR-0009 §9); walk-forward and DSR are Phase 6 |

@@ -18,6 +18,7 @@ from aurum.backtest.accounting import equity_frame, journal_frame, summarize, tr
 from aurum.backtest.broker import SimBroker, SimCosts
 from aurum.backtest.loading import load_market
 from aurum.backtest.runner import run_backtest
+from aurum.backtest.sealed import resolve_access
 from aurum.backtest.storage import new_run_id, write_run
 from aurum.core.clock import ManualClock
 from aurum.core.errors import ConfigError
@@ -50,6 +51,10 @@ class RunRequest:
     """``policy``: the Phase 4 risk engine (risk.yaml). ``fixed``: backtest.fixed_volume_lots
     on every approved signal, only for the MT5 Strategy Tester parity check."""
     notes: str = ""
+    open_sealed: bool = False
+    """The one-time, journalled opening of the sealed final-test period (aurum.backtest.sealed)."""
+    opened_by: str = ""
+    open_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,16 @@ def execute(
         if request.slippage_points is None
         else request.slippage_points
     )
+    code_version = current_code_version(settings.project_root)
+    cfg_hash = config_hash(cfg)
+    access = resolve_access(
+        cfg,
+        request,
+        ledger_file=ledger_path(settings.data_dir),
+        config_hash=cfg_hash,
+        code_version=code_version,
+        clock=clock,
+    )
     layout = DataLayout(settings.data_dir)
     loaded = load_market(
         layout,
@@ -92,6 +107,8 @@ def execute(
         last=request.last,
         warmup_days=bt.warmup_days,
         bar_spread_extra_points=bt.bar_spread_extra_points,
+        last_data_day=access.last_data_day,
+        sealed=access.forbidden,
     )
     strategy = build_strategy(
         cfg.strategies[request.strategy], variant=request.variant, symbol=symbol, point=spec.point
@@ -174,8 +191,6 @@ def execute(
     }
     created = clock.now()
     run_id = new_run_id(created, request.strategy, request.variant)
-    code_version = current_code_version(settings.project_root)
-    cfg_hash = config_hash(cfg)
     data_hash = loaded.data_hash(settings.data_dir)
     manifest: dict[str, Any] = {
         "created_at": created.isoformat(),
@@ -192,6 +207,7 @@ def execute(
         "spec": spec.model_dump(mode="json"),
         "params": params,
         "notes": request.notes,
+        "sealed_opened": access.opened,
     }
     with TrialLedger(ledger_path(settings.data_dir)) as ledger:
         trial = ledger.record_trial(
@@ -204,6 +220,7 @@ def execute(
             notes=request.notes or f"backtest run {run_id}",
             code_version=code_version,
             config_hash=cfg_hash,
+            sealed_test_opened=access.opened,
         )
     manifest["trial_id"] = trial.trial_id
     manifest["outputs"] = write_run(

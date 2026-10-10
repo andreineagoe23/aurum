@@ -685,8 +685,20 @@ def backtest_run(
         str, typer.Option(help="policy (risk.yaml) or fixed (parity check only)")
     ] = "policy",
     notes: Annotated[str, typer.Option(help="Free text stored with the run and the trial")] = "",
+    open_sealed: Annotated[
+        bool,
+        typer.Option(
+            "--open-sealed",
+            help="Open the sealed final-test period: once per strategy and variant, journalled",
+        ),
+    ] = False,
+    by: Annotated[str, typer.Option("--by", help="Who opens the sealed period")] = "",
+    reason: Annotated[str, typer.Option("--reason", help="Why the sealed period is opened")] = "",
 ) -> None:
-    """Run one backtest; writes reports/runs/<run_id>/ and records a trial in the ledger."""
+    """Run one backtest; writes reports/runs/<run_id>/ and records a trial in the ledger.
+
+    Research strategies never read the sealed final-test period (configs/backtest.yaml) unless
+    --open-sealed --by --reason is given, which is allowed once and journalled first."""
     from aurum.backtest.pipeline import RunRequest, execute
 
     settings = _settings_or_exit()
@@ -699,6 +711,9 @@ def backtest_run(
         slippage_points=slippage_points,
         risk="fixed" if risk == "fixed" else "policy",
         notes=notes,
+        open_sealed=open_sealed,
+        opened_by=by,
+        open_reason=reason,
     )
     if risk not in ("policy", "fixed"):
         console.print(f"[red]--risk must be policy or fixed, not {risk!r}[/red]")

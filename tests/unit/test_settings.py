@@ -54,6 +54,9 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
     assert app_config.strategies["reference_fixed_time"].family == "reference"
     assert app_config.backtest.bar_spread_extra_points == 2
     assert app_config.backtest.latency_ms == 200
+    sealed = app_config.backtest.sealed_period
+    assert (sealed.first.isoformat(), sealed.last.isoformat()) == ("2025-10-01", "2026-10-08")
+    assert sealed.exempt_families == ["reference"]
     assert not any(s.enabled for s in app_config.strategies.values())
 
 
@@ -76,6 +79,19 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
         ("broker", {"server_time": {"shift_hours": 30}}, "shift_hours"),
         ("broker", {"server_time": {"timezone": "Mars/Olympus"}}, "unknown timezone"),
         ("broker", {"commission": {"per_lot_per_side": -1}}, "per_lot_per_side"),
+        # Sealed final-test period (D1): ordered, and only the reference family may be exempt
+        ("backtest", {"sealed_period": {"first": "2026-10-08", "last": "2025-10-01"}}, "before"),
+        (
+            "backtest",
+            {
+                "sealed_period": {
+                    "first": "2025-10-01",
+                    "last": "2026-10-08",
+                    "exempt_families": ["trend_pullback"],
+                }
+            },
+            "only the reference family",
+        ),
     ],
 )
 def test_invalid_values_fail_loudly(
