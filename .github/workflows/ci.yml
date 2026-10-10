@@ -1,0 +1,78 @@
+# Verifies every push to main and every pull request on clean Linux and macOS runners with the
+# project's canonical commands (CLAUDE.md). Windows is not here: the MT5 integration tests need
+# the controlled Windows VM with a running terminal, and they auto-skip off Windows
+# (tests/conftest.py). CI never contacts a terminal, sends orders or reads a .env.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.12"]
+    env:
+      PYTHONHASHSEED: "0"
+      TZ: UTC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          # The uv that wrote uv.lock; v10.3.0 embeds its checksum.
+          version: "0.12.24"
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # --locked: install exactly uv.lock (dev group included) and fail if it is out of date
+      # with pyproject.toml; never re-resolves or writes the lockfile.
+      - name: Install locked dependencies
+        run: uv sync --locked --dev
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      # Strict over the configured files = ["src"]; pytest imports and runs the tests.
+      - name: Mypy (strict, src)
+        run: uv run mypy
+
+      # Floor: docs/STATUS.md. fail-under compares round(total, precision); the default
+      # precision 0 would let 90.5% pass a 91 floor, so compare at 2 decimals.
+      - name: Pytest with line and branch coverage
+        env:
+          AURUM_DATA_DIR: ${{ runner.temp }}/aurum-data
+        run: |
+          mkdir -p "$AURUM_DATA_DIR"
+          uv run pytest --cov=aurum --cov-branch --cov-report=term-missing \
+            --cov-report=xml --cov-precision=2 --cov-fail-under=91
+
+      - name: Upload coverage.xml
+        if: ${{ !cancelled() && hashFiles('coverage.xml') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
+          retention-days: 7

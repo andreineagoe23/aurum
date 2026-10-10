@@ -15,7 +15,7 @@ _Last updated: 2026-10-10._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **Approved with conditions; not started.** Blocked on the pre-Phase-5 queue below: items 1–5 done, **6 (CI) left** | — |
+| 5 Strategy lab | **Approved with conditions; ready to begin, not started.** All six pre-Phase-5 items are done; waiting for the user's review before starting | — |
 
 ## Work queue (in order)
 
@@ -79,8 +79,38 @@ _Last updated: 2026-10-10._
    `reports/phase_1.md`, measured on the old **GBP** account. The USD-account values above
    come from the data-dir snapshot, which is not in git. Record them in a tracked doc when
    the next spec is written (or re-run `aurum mt5 symbols --find gold`).
-6. **CI** (GitHub Actions or similar: ruff, format check, mypy, pytest on Linux/macOS). "Windows
-   only, no CI" is the weakest point of Phase 4. MT5 tests auto-skip off Windows.
+6. ~~**CI**~~ — **done**: `.github/workflows/ci.yml` (GitHub Actions).
+   - **Runs on:** push to `main`, every pull request, and manual dispatch.
+   - **Matrix:** `ubuntu-latest` and `macos-latest`, Python 3.12 (`fail-fast: false`).
+   - **Install:** uv 0.12.24, the version that wrote `uv.lock`, then `uv sync --locked --dev`.
+     It installs exactly the lock, including the dev group, and fails if the lock is stale; it
+     never rewrites it.
+   - **Gates, in order:** `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy`,
+     then `uv run pytest --cov=aurum --cov-branch --cov-report=term-missing
+     --cov-report=xml --cov-precision=2 --cov-fail-under=91`.
+   - **Artifacts:** `coverage.xml` is uploaded per OS (`coverage-<os>-py3.12`, 7 days),
+     including after failed test or coverage runs.
+   - **Safety:** permissions `contents: read`; actions pinned to commit SHAs; no secrets,
+     `.env`, MT5 or order variables; `AURUM_DATA_DIR` points at the runner's empty temp dir.
+     Concurrency cancels superseded runs of the same ref. 30-minute timeout,
+     `PYTHONHASHSEED=0`, `TZ=UTC`.
+   - **Coverage floor 91, not 92.** On the VM the MT5 integration tests run against the
+     terminal, and the total is 92.05–92.07%. Without them, as on Linux/macOS, a clean clone
+     measures **91.99%** (lines 5,788/6,163 = 93.92%, branches 1,145/1,374 = 83.33%;
+     hypothesis moves it by ±1–2 branches). That is below 92. `--cov-precision=2` because
+     fail-under compares `round(total, precision)`, and at the default 0 a 91.99% total
+     would pass a 92 floor. Raise the floor when the measured total allows; never lower it
+     silently.
+   - **MT5 tests skip** off Windows or without the `MetaTrader5` package (`tests/conftest.py`),
+     so CI never contacts a terminal. Order tests also need `AURUM_MT5_ORDER_TESTS=1`, which CI
+     never sets. Windows/MT5 checks stay on the VM.
+   - **`uv run mypy src tests` is intentionally not a gate.** mypy is configured strict over
+     `files = ["src"]`; pytest imports and runs the tests. That command fails before checking
+     (`test_mt5_adapter.py` "found twice under different module names"), and tests are not
+     reorganised for it.
+   - **Pending until pushed:** the first Actions run on Linux and macOS (exact coverage there,
+     cache, artifact upload). No README badge: the repo is private, so the badge image does not
+     render outside GitHub sessions with access.
 
 ### B. Later, tracked
 
@@ -99,7 +129,8 @@ _Last updated: 2026-10-10._
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Mac checks**: `uv run ruff check && uv run mypy && uv run pytest` (only ever run on the VM).
+- **Push and check the first CI run** (`.github/workflows/ci.yml`). Linux/macOS have never run
+  the suite; read the coverage total from the job log and raise the floor if it allows.
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
@@ -124,9 +155,13 @@ _Last updated: 2026-10-10._
 - This checkout runs on the **Windows 11 ARM VM** (`C:\code\aurum`), venv `C:\venvs\aurum`
   (x64 Python under emulation), data `C:\aurum-data` (`AURUM_DATA_DIR`). The live tick
   collector runs there continuously; don't stop it.
+- **Editing `pyproject.toml` on the VM breaks `uv run` while the collector runs.** uv sees the
+  file's new mtime, rebuilds the editable install, and fails to replace
+  `C:\venvs\aurum\Scripts\aurum.exe` (os error 32), which the collector holds open. Use
+  `uv run --no-sync …` until the collector is next restarted. Found 2026-10-10; that edit was
+  reverted.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
-- Test suite: 393 tests (384 passed, 9 skipped on the VM: MT5 live-market/order tests and one
-  non-Windows test), ~64 s with coverage, 92% coverage (2026-10-10). Keep it lean (see
-  `CLAUDE.md`). `uv run mypy` (configured `files = ["src"]`) is clean; `uv run mypy src tests`
-  fails before checking: `tests/unit/test_mt5_adapter.py` "found twice under different module
-  names" (tests has no `__init__.py`; pre-existing, for the CI item).
+- Test suite: 393 tests (384 passed, 9 skipped on the VM: 6 live-market checks with the market
+  closed, 2 demo-order tests, 1 non-Windows test), ~65–90 s with coverage, 92.07% combined on
+  the VM (2026-10-10). Keep it lean (see `CLAUDE.md`). CI checks the same suite on Linux/macOS
+  (item 6).
