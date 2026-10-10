@@ -1,5 +1,13 @@
 # trend_pullback — strategy spec
 
+> **Result (2026-10-11): REJECTED.** Under the registered gates, 0.2.0 + amendment A1 does not
+> qualify for progression. m15 fails gates 2, 3, 4, 7, 8, 9 and 12. m5 has a profitable OOS
+> simulation but fails gates 9 and 12. No candidate goes to the sealed test, and gates 5, 10
+> and 11 were not evaluated. Evidence and the reviewer's conclusion:
+> `docs/strategies/evidence/trend_pullback_2026-10-10_dev_analysis.md` (sections 4–6). This
+> version is not rerun or changed to rescue it. Any revision is a new, explicitly post-results
+> hypothesis whose trials add to these 54.
+>
 > **Status: APPROVED 0.2.0, pre-registered** by the owner on 2026-10-10. The approved text is
 > commit `b9baf4c`; later edits are labelled, not rule changes. The owner's approval was of
 > the reported specification, not a line-by-line review of that diff.
@@ -571,3 +579,4 @@ why version 0.1.0 tied the hold window to the 8 swing bars.
 | 0.2.0 (approved) | 2026-10-10 | Approval recorded; D6 = (b); timeout wording "signal-to-exit"; status, header and section 0. **No rule changed.** | Owner approval of `b9baf4c` |
 | 0.2.0 (clarified) | 2026-10-10 | Defines the `data_gap` diagnostic (section 16, Reported): one per decision time with a missing bar in the variant's read set. **No rule changed.** | Implementation review (2026-10-10) |
 | 0.2.0 (amendment A1) | 2026-10-10 | Pre-results evaluation-period amendment (section 16): evaluated trading period 2020-12-15 … 2025-09-30, initial balance 10,000 USD at 2020-12-15, training-only window from 2020-12-15. 2020-11-12 … 12-14 is warm-up only. OOS folds, rules, grid, costs, risk, thresholds and the warm-up requirement are unchanged. Both variants are bound to one pinned symbol snapshot. **No rule changed.** | The approved grid command was refused before any attempt: no warm-up history before 2020-11-12. Reviewer approved option A |
+| 0.2.0 (result) | 2026-10-11 | Rejected: m15 fails gates 2, 3, 4, 7, 8, 9, 12; m5 fails 9, 12; no candidate to the sealed test; gates 5, 10, 11 not evaluated. Gate 13 is reported as candidate-specific evidence (no trend_pullback sealed-period evaluation, 0 openings and 0 parity accesses), apart from the 10 historical `reference_fixed_time` ledger rows that predate the seal. **No rule changed.** | Reviewer conclusion on the 54 development trials |
