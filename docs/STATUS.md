@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped. Family 3, `vwap_reversion`: documentation-only draft 0.1.0 for review, nothing authorised (queue A4) | — |
 
 ## Work queue (in order)
 
@@ -525,6 +525,18 @@ failed".
 10. ~~**Select or reject the family**~~: **rejected** (2026-10-11, above). The result is
     "opening_range_breakout 0.1.0 failed".
 
+### A4. Phase 5 family 3: vwap_reversion (owner, 2026-10-11)
+
+1. **Documentation-only draft 0.1.0, for review:** `docs/strategies/vwap_reversion.md`.
+   - DRAFT, not frozen, not implemented; no trial authorised. No market data, ledger or
+     snapshot was read and no feasibility count was run.
+   - Open decisions V1–V15 (spec section 0), including the proposed Phase 5 stop rule (V14):
+     if neither variant survives, the three-family lab ends and `reports/phase_5.md` is
+     written; no fourth family, rescue revision or ML without a separate owner decision.
+   - Trial accounting: N = 66 + the vwap_reversion research trials actually recorded.
+   - Approval boundaries B0–B9 (spec section 18b). **Before any trial (B5): an explicit owner
+     decision on the unresolved tester parity** (Phase 3).
+
 ### B. Later, tracked
 
 - Adopted positions (state file lost) get no timeout/invalidation, only force-flat + kill
@@ -560,7 +572,8 @@ failed".
   stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
   Opening-range breakout: 0.1.0 frozen and implemented; its 12 development trials ran on
-  2026-10-11; rejected by the owner on 2026-10-11 (queue A3). Then VWAP reversion.
+  2026-10-11; rejected by the owner on 2026-10-11 (queue A3). Then VWAP reversion: draft
+  0.1.0 for review, nothing authorised (queue A4).
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
