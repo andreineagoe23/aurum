@@ -33,7 +33,7 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `data` | Phase 2 pipeline: `backfill`, `normalize`, `resample` (ticks → M1 → M5/M15/H1), `pipeline` (canonical bars, tick fidelity ADR-0007), `compare`, `qa`, `market_hours`, `spreads`, `hashes`, `depth`, `schemas` (all column definitions), `reports`, `summary` |
 | `sessions` | `clock.SessionClock` (London wall clock → UTC phases, ADR-0002), `calendar.TradingCalendar` (phases + market closures and early closes), `state_machine` (emits on first update → restart flattens), `news` (blackout windows) |
 | `features` | `view` (`BarStore`/`MarketView`: completed bars only), `asof` (joins on close time), `indicators` (ATR, windowed EMA) |
-| `strategies` | `base` contract (Signals only; `warmup_bars`, `diagnostics`), `reference.FixedTimeReference` (parity/null strategy), `trend_pullback.TrendPullback` (Phase 5 family 1, spec 0.2.0; fixed rules as constants, only the declared grid as params), `registry` (config → strategy) |
+| `strategies` | `base` contract (Signals only; `warmup_bars`, `diagnostics`), `reference.FixedTimeReference` (parity/null strategy), `trend_pullback.TrendPullback` (Phase 5 family 1, spec 0.2.0, rejected; fixed rules as constants, only the declared grid as params), `opening_range_breakout.OpeningRangeBreakout` (family 2, spec 0.1.0 frozen; stateless walk of each range window, per-range-date `outcomes()` and status counts), `registry` (config → strategy, declared grids) |
 | `risk` | `base` (`RiskEngine`, `RiskContext`), `policy.PolicyRiskEngine` (sizing + every gate, ADR-0010), `fixed.FixedVolumeRisk` (tester parity only) |
 | `execution` | `engine.Engine` (the per-step decision loop for every mode), `orders.OrderManager` (only send path), `intents` (SQLite intent store), `reconcile`, `killswitch` (ADR-0011) |
 | `backtest` | `market.HistoricalMarket` (ticks or bars per day), `broker.SimBroker` (fills, intra-bar rules, ADR-0009), `runner` (wake-up schedule), `pipeline` (`prepare`: validation + frozen evaluation context → attempt → staged run → trial and success in one transaction → publish; failures kept with their stage; `recover_artifacts`), `grid` (a strategy's declared search grid as one batch frozen to its context; points with a trial never rerun, explicit linked retries), `accounting` (cost attribution, equity, metrics), `parity`, `storage`, `loading` (`plan_market` lists every input file and refuses sealed ones before reading; `read_market`), `sealed` (sealed final-test guard and its one-time journalled opening) |
@@ -64,7 +64,7 @@ pending entries → per position TIMEOUT / INVALIDATION → in OPEN at a decisio
 strategy → risk → `OrderManager.submit`. A disconnect ends the step; the next step retries.
 
 **Backtest** (`aurum backtest run` → `backtest/pipeline.py`): `prepare` validates the request,
-resolves sealed access and plans every input file (warm-up included) into the frozen evaluation
+resolves sealed access and plans every input file (warm-up included: the strategy's `warmup_bars` and the engine's `HISTORY_BARS`, merged by maximum per timeframe) into the frozen evaluation
 context → ledger attempt → read the Phase 2 store → `SimBroker` + `Engine` + risk engine →
 `runner.run_backtest` wakes at M5 closes, phase boundaries and `max_hold` deadlines; at each wake
 the broker first processes quotes before `t`, then the engine decides on bars closed by `t` →
@@ -104,7 +104,8 @@ placeholders (exit 2): `validate walkforward`, `shadow run`, `trade demo`.
 | `property/test_session_properties.py`, `…timeframe…`, `…servertime…` | DST and time rules swept over years against independent oracles |
 | `unit/test_sim_broker.py` | Fill prices, intra-bar worst-case rules, rejections |
 | `unit/test_trend_pullback.py` | trend_pullback 0.2.0 rules on exact synthetic bars: equality boundaries, gaps, stop bounds and rounding, M5 window/expiry/replacement/one use/restart, H1 invalidation |
-| `unit/test_backtest_cli.py` | Backtest end to end on a synthetic store; sealed-period refusal and one-time opening; warm-up by bar count; grid batches frozen to their evaluation context; recorded trials recovered, never re-evaluated; empty periods leave no ledger row |
+| `unit/test_opening_range_breakout.py` | opening_range_breakout 0.1.0 with the real calendar and blackout: anchors and eligible times per DST regime, early closes, equality boundaries, stop bounds and rounding, blackout instants, data gaps, one use, restart, diagnostic deduplication, the 12 declared points, the spec trace |
+| `unit/test_backtest_cli.py` | Backtest end to end on a synthetic store; sealed-period refusal and one-time opening; warm-up by bar count, merged with the engine's M15 history by maximum; grid batches frozen to their evaluation context; recorded trials recovered, never re-evaluated; empty periods leave no ledger row |
 | `integration/test_mt5_smoke.py` | Real terminal (Windows only; orders need `AURUM_MT5_ORDER_TESTS=1`) |
 
 Helpers: `factories.py` (models), `fake_mt5.py` (fake `MetaTrader5` module), `simdata.py`

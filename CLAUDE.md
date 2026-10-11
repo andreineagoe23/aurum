@@ -89,8 +89,9 @@ Its job is to tell the truth, not to make backtests look good.
   outcome in one transaction (one trial per batch point), then publishes `reports/runs/<id>/`
   (git-ignored); a recorded point is never evaluated again (`aurum backtest recover` publishes
   staged files). Reruns must be byte-identical
-  (`aurum backtest compare`). Warm-up is loaded by the strategy's `warmup_bars` count, not
-  calendar days.
+  (`aurum backtest compare`). Warm-up is loaded by bar count, not calendar days: the
+  strategy's `warmup_bars` merged by maximum per timeframe with the engine's own history
+  (`engine.HISTORY_BARS`: 100 M15 bars for the policy risk engine's ATR; none with `--risk fixed`).
 - Sealed final-test period (`backtest.yaml` `sealed_period`, 2025-10-01 … 2026-10-08): no
   backtest reads it; the loader refuses its files before reading. Two journalled ways in:
   - a research strategy's one-time `--open-sealed --by --reason` (once per strategy and
