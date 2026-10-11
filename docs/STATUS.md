@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped. Family 3, `vwap_reversion`: draft 0.1.0 revision 4; B0 decided 2026-10-11 (V1–V17 accepted, V17 explicitly); **B1 feasibility diagnostic authorised** 2026-10-11 with rulings R1–R6; not frozen; nothing beyond B1 authorised (queue A4) | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped. Family 3, `vwap_reversion`: draft 0.1.0 revision 4; B0 decided 2026-10-11 (V1–V17 accepted, V17 explicitly); **B1 feasibility diagnostic authorised** 2026-10-11 with rulings R1–R6 and **run** (methodology `a09b196`): at most 9 (m15) and 41 (m5) geometry-eligible signals per point over the whole development period, and no point reaches the 100 prior signals that selection needs; awaiting the owner's decision; not frozen; nothing beyond B1 authorised (queue A4) | — |
 
 ## Work queue (in order)
 
@@ -595,6 +595,41 @@ failed".
      opening.
    - Approval boundaries B0–B9: spec section 18b.
    - **Tester parity remains an explicit owner decision at B5, before any trial** (Phase 3).
+4. **B1 run: done (2026-10-11), descriptive result for the owner.** Ran from the clean
+   methodology commit `a09b196`, with no script or rule change after the data was opened.
+   - **Evidence:** `docs/strategies/evidence/vwap_reversion_2026-10-11_b1_feasibility.md`
+     (sha256 `e9e4090b…`) and `.csv` (`587cc874…`, 7,084 lines), plus the run record
+     `…_b1_run.md`. That record holds the launch, the interpreter and wrapper hashes and the
+     input digests: M5 `64135e79…`, M15 `44a88edb…`, H1 `b010da9d…`. It also holds the R6
+     exclusions (M5 24, M15 8, H1 2 rows, counted only) and the output hashes. **The second
+     run was byte-identical.** 500 synthetic cases passed before any data was read, and the
+     input files were unchanged after the run.
+   - **Population:** 1,237 trading dates, 2,474 session-dates, all with complete read sets.
+     There were no zero-weight bars, no `data_gap`, `twv_undefined` or `no_decision_time`
+     statuses, and no hold-bound violations. All 2,474 session-dates match spec table 6.1.
+   - **Setups exist; geometry-eligible signals almost never do.** These are signals, not
+     trades. Over 2020-12-15 … 2025-09-30, per point:
+     - m15: 7–9 signals. Default (1.5, 0.30): 391 spends → 287 `stop_below_minimum`,
+       1 `stop_above_cap`, 96 `reward_risk_below_min`, **7 signals**.
+     - m5: 21–41 signals. Default: 809 spends → 665 / 1 / 120, **23 signals**.
+     - Only 9.9–20.1% of spends have `TWV(T)` at least 9.75 USD beyond the extreme, the
+       necessary condition of section 13.1.
+     - Folds 1–4 hold 5–7 signals (m15) and 20–38 (m5). For m5, 11–22 of each point's signals
+       fall in 2025.
+   - **Selection:** no point of either variant reaches 100 strictly prior signals at any
+     fold boundary, or over the whole period. The maxima are 3 before fold 1 and 41 over the
+     whole period. 100 prior signals is necessary, not sufficient, for selection under
+     section 16. So, under the registered rules, no fold could select a point and no frozen
+     configuration could exist, even before the risk engine, the quotes or any P&L.
+   - **Life cycle and diagnostics:** breaking dominates. Most setups end broken, typically
+     by a same-side newer setup (m15: nearly always at that same instant). There were 0–28
+     ambiguous bars per point and 628–3,261 `setup_regime_off`. Near-boundary ties, all exact
+     price equalities that never changed a classification: break 188, extreme 642,
+     rejection 119; deviation, ER and room: 0.
+   - **Data-informed from here on.** Every later choice about this family is made knowing
+     these counts. Nothing is proposed here: the owner decides what follows. Not done: B2,
+     freeze, implementation, config or registry change, backtest, P&L, ledger, trial, parity,
+     sealed access.
 
 ### B. Later, tracked
 
