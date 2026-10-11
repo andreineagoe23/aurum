@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **first-stage assessment written, provisional, for review**: m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12 (queue A3) | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped | — |
 
 ## Work queue (in order)
 
@@ -505,6 +505,26 @@ failed".
      - Nothing was normalised or rerun.
    **Claude stops for review.**
 
+   **Owner decision (2026-10-11): opening_range_breakout 0.1.0 is rejected under section 16.**
+   - **m15 rejected:** fails gates 2, 3, 4, 7, 8, 9 and 12. **m5 rejected:** fails gates 3, 4,
+     7, 8, 9 and 12. Both pass 1, 6 and 13.
+   - Gates 5, 10 and 11 remain **not evaluated** (neither passed nor failed).
+   - **No candidate is selected; this registered evaluation stops.** No stress re-run,
+     best-case replay, baseline rerun, sealed opening, retry or final selection.
+   - Both variants lose on the `london` range and on the short side. The positive `newyork`
+     slices are descriptive findings, not approved candidates.
+   - **Cumulative research trials remain 66** (54 trend_pullback + 12 ORB, reference trials
+     excluded); rejected trials stay in the accounting.
+   - Evidence, unchanged:
+     `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_analysis.md` (its
+     "provisional, for review" line predates this decision; this entry is the decision record),
+     `_dev_points.csv`, `_dev_dsr_trials.csv`, `_dev_batch.md`, `_dev_launch.md`. Trials,
+     attempts, run files, hashes, source identities and ledger backups are preserved. The
+     frozen spec is unchanged.
+9. ~~**Phase 3b replay only when triggered**~~: not reached (no candidate).
+10. ~~**Select or reject the family**~~: **rejected** (2026-10-11, above). The result is
+    "opening_range_breakout 0.1.0 failed".
+
 ### B. Later, tracked
 
 - Adopted positions (state file lost) get no timeout/invalidation, only force-flat + kill
@@ -529,7 +549,8 @@ failed".
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Review of the opening_range_breakout first-stage assessment** (queue A3, item 8).
+- ~~**Review of the opening_range_breakout first-stage assessment**~~: decided 2026-10-11,
+  both variants rejected (queue A3, item 8).
 - **The live tick collector is not running** (last heartbeat 2026-10-10 16:42Z, found
   2026-10-11). Restart it deliberately when convenient; Claude did not start or touch it.
 
@@ -539,7 +560,7 @@ failed".
   stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
   Opening-range breakout: 0.1.0 frozen and implemented; its 12 development trials ran on
-  2026-10-11; first-stage assessment provisional, for review (queue A3). Then VWAP reversion.
+  2026-10-11; rejected by the owner on 2026-10-11 (queue A3). Then VWAP reversion.
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
