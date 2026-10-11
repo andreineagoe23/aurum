@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **stopped before analysis** (queue A3) | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **first-stage assessment written, provisional, for review**: m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12 (queue A3) | — |
 
 ## Work queue (in order)
 
@@ -115,9 +115,9 @@ _Last updated: 2026-10-11._
      1,145/1,374 = 83.33%, **combined 91.97%**. uv 0.12.24 installed from the lock unchanged;
      cache saved; artifacts `coverage-ubuntu-latest-py3.12` and `coverage-macos-latest-py3.12`
      uploaded.
-   - **Latest recorded run (2026-10-11 08:31 UTC):** run 38125080756 on `b5ea565`, the
-     reviewed state of the ORB implementation (run 38124934320 on `a182036` had the same
-     result). **Success**; both jobs passed every step: **409 passed, 11 skipped**. Coverage
+   - **Latest recorded run (2026-10-11 08:58 UTC):** run 38126696362 on `df50a8b`, the
+     accepted batch inventory (runs 38125080756 on `b5ea565` and 38124934320 on `a182036` had
+     the same result). **Success**; both jobs passed every step: **409 passed, 11 skipped**. Coverage
      was identical on both: 7,344 statements (429 missed), 1,684 branches (185 partial),
      **combined 92.27%**, above the 91 floor. The commit that records this result is not
      itself recorded here.
@@ -450,11 +450,60 @@ failed".
      `scripts/opening_range_breakout_dev_batch.py` →
      `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_batch.md`, `_index.csv`,
      `_contexts.json`.
-8. **Evaluation script** (next, not started): the registered section 16 analysis, read-only,
-   with the undefined-Sharpe DSR handling (an undefined candidate SR or V fails gate 12;
-   undefined trial SRs are listed, kept in N and left out of V) and synthetic tests for it,
-   **before** it is used. **Claude stops before analysis.** Not authorised: stress, replay,
-   baseline, sealed tests, candidate selection.
+8. ~~**Evaluation, first stage**~~. The reviewer accepted the inventory at `df50a8b` and
+   authorised a read-only assessment of the existing 12 runs (2026-10-11). **Done,
+   provisional, for review.**
+   - **Tested first** (`tests/unit/test_walkforward.py`, 2 new tests, synthetic):
+     - `walkforward.assess_dsr` (gate 12):
+       - undefined trial SRs are listed, kept in N and left out of V;
+       - an undefined candidate SR or V fails;
+       - fewer than 2 defined trial SRs fails;
+       - N must equal the trials listed;
+       - non-finite inputs and an invalid threshold fail closed.
+     - `defined_sharpe` returns None for fewer than 2 values, a non-finite value or zero
+       variance.
+     - `walkforward.walk_forward`: prior-only selection (a trade exactly at the fold start
+       is not prior), exact ties to the default, and a fold with no eligible point
+       contributing no trades (gate 1 fails).
+     - `deflated_sharpe` is unchanged, so the trend_pullback analysis is unaffected.
+   - **Assessment:** `scripts/opening_range_breakout_dev_analysis.py`, read-only, no
+     simulation, reproducible byte for byte. It writes
+     `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_analysis.md`, plus
+     `_points.csv` and `_dsr_trials.csv`. Contents:
+     - the defaults, full period, descriptive;
+     - all 12 points in grid order;
+     - prior-only fold selections;
+     - concatenated OOS without rescaling;
+     - splits by fold, year, side, session and DST regime, plus monthly;
+     - cost attribution, exit reasons, range-date statuses and risk rejections by reason.
+   - **Fold selections:** no ties, and 6 eligible points in every fold.
+     - m15: (2, 1.0), (2, 1.0), (2, 1.0), (2, 2.0).
+     - m5: (2, 1.0), (2, 1.0), (2, 2.0), (2, 2.0).
+   - **Concatenated OOS:**
+     - m15: 1,166 trades, −0.23 USD/trade, PF 0.958, max DD 417.47.
+     - m5: 1,176 trades, +0.05 USD/trade (+58.24 USD), PF 1.008, max DD 447.01.
+   - **Gates** (provisional; the reviewer decides what follows):
+     - m15 fails 2, 3, 4, 7, 8, 9 and 12;
+     - m5 fails 3 (1 of 4 folds positive), 4, 7, 8 (SELL −0.05 USD/trade), 9 (`london_morning`
+       −0.78 USD/trade) and 12;
+     - both pass 1, 6 and 13.
+     - Under section 16 each variant already fails at least one evaluated gate.
+   - **DSR:**
+     - N = 66: the 54 trend_pullback trials and the 12 ORB trials; reference trials excluded.
+     - Each trial's SR is over the same 1,032 folds 1–4 market days.
+     - Undefined trial SRs: 0, so V is over all 66 (6.293e-04).
+     - DSR: m15 0.0061, m5 0.0354.
+   - **Not evaluated:** gates 5, 10 and 11. Not run: stress, replay, baseline, sealed test,
+     retry, final candidate selection. No ledger record was modified (opened read-only).
+   - **Launch and identity evidence:**
+     `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_launch.md`. It records:
+     - the exact interpreter launches and the wrapper's source (sha256 `7714dc0e…`);
+     - why the environment hash equals `uv run --no-sync`'s;
+     - the raw recorded source identity `70fe4b3a…`, with the CRLF caveat (`parity.py` and
+       `opening_range_breakout.py`). A fresh LF checkout of `b5ea565` would hash to
+       `89a8182b…`.
+     - Nothing was normalised or rerun.
+   **Claude stops for review.**
 
 ### B. Later, tracked
 
@@ -480,7 +529,7 @@ failed".
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Review of the opening_range_breakout batch inventory** before analysis (queue A3).
+- **Review of the opening_range_breakout first-stage assessment** (queue A3, item 8).
 - **The live tick collector is not running** (last heartbeat 2026-10-10 16:42Z, found
   2026-10-11). Restart it deliberately when convenient; Claude did not start or touch it.
 
@@ -490,7 +539,7 @@ failed".
   stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
   Opening-range breakout: 0.1.0 frozen and implemented; its 12 development trials ran on
-  2026-10-11; stopped before analysis (queue A3). Then VWAP reversion.
+  2026-10-11; first-stage assessment provisional, for review (queue A3). Then VWAP reversion.
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
@@ -521,7 +570,7 @@ failed".
     deliberately;
   - never work around this by editing file timestamps.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
-- Test suite: 420 tests (411 passed, 9 skipped on the VM: 6 live-market checks with the market
+- Test suite: 422 tests (413 passed, 9 skipped on the VM: 6 live-market checks with the market
   closed, 2 demo-order tests, 1 non-Windows test), ~2.5 min with coverage, 92.33% combined on
-  the VM (2026-10-11, after the opening_range_breakout implementation). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 409 passed,
-  11 skipped, 92.27% (run 38125080756 on `b5ea565`, item 6).
+  the VM (2026-10-11, after the gate-12 and walk-forward tests). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 409 passed,
+  11 skipped, 92.27% (run 38126696362 on `df50a8b`, item 6).

@@ -40,7 +40,7 @@ execution code never know whether they run in a backtest, shadow mode or demo tr
 | `ledger` | `trial_ledger.TrialLedger`: append-only SQLite, content-hashed trial rows; `attempts` (with their evaluation context) + `attempt_outcomes` (every evaluation, failed or unfinished included, retries linked); `grid_batches` (context frozen per batch); one trial per batch point (unique index); `sealed_openings` (once per strategy and variant) and `parity_accesses` journals |
 | `monitoring` | `logging` (structlog JSON, secret redaction), `doctor`, `watchdog` (heartbeat → kill switch) |
 | `apps` | `collector` (live ticks, Windows); `shadow`, `trader` are Phase 7/8 placeholders |
-| `validation` | `phase3b` (Phase 3b trigger on a candidate's worst/best intra-bar runs, ADR-0009 §9); walk-forward and DSR are Phase 6 |
+| `validation` | `phase3b` (Phase 3b trigger on a candidate's worst/best intra-bar runs, ADR-0009 §9); `walkforward` (registered section 16 statistics: prior-only `select_point` and anchored `walk_forward`, closed-trade drawdown, neighbours, `deflated_sharpe`, and `assess_dsr`, gate 12 failing closed when the DSR is undefined) |
 | `settings.py` | `.env` + `configs/*.yaml` → validated `Settings`; safety caps live in validators |
 | `cli.py` | `aurum` Typer app (below) |
 
@@ -105,6 +105,7 @@ placeholders (exit 2): `validate walkforward`, `shadow run`, `trade demo`.
 | `unit/test_sim_broker.py` | Fill prices, intra-bar worst-case rules, rejections |
 | `unit/test_trend_pullback.py` | trend_pullback 0.2.0 rules on exact synthetic bars: equality boundaries, gaps, stop bounds and rounding, M5 window/expiry/replacement/one use/restart, H1 invalidation |
 | `unit/test_opening_range_breakout.py` | opening_range_breakout 0.1.0 with the real calendar and blackout: anchors and eligible times per DST regime, early closes, equality boundaries, stop bounds and rounding, blackout instants, data gaps, one use, restart, diagnostic deduplication, the 12 declared points, the spec trace |
+| `unit/test_walkforward.py` | Prior-only selection, exact ties, no fallback when no point is eligible; drawdown and neighbours; the DSR formula; gate 12 keeps undefined trial SRs in N and out of V and fails closed (undefined candidate SR or V, fewer than 2 defined SRs, non-finite inputs) |
 | `unit/test_backtest_cli.py` | Backtest end to end on a synthetic store; sealed-period refusal and one-time opening; warm-up by bar count, merged with the engine's M15 history by maximum; grid batches frozen to their evaluation context; recorded trials recovered, never re-evaluated; empty periods leave no ledger row |
 | `integration/test_mt5_smoke.py` | Real terminal (Windows only; orders need `AURUM_MT5_ORDER_TESTS=1`) |
 
