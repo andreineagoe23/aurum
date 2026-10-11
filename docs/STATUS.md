@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped. Family 3, `vwap_reversion`: documentation-only draft 0.1.0 revision 3; B0 decided 2026-10-11 (V1–V17 accepted, V17 explicitly); not frozen; nothing beyond B0 authorised (queue A4) | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped. Family 3, `vwap_reversion`: draft 0.1.0 revision 4; B0 decided 2026-10-11 (V1–V17 accepted, V17 explicitly); **B1 feasibility diagnostic authorised** 2026-10-11 with rulings R1–R6; not frozen; nothing beyond B1 authorised (queue A4) | — |
 
 ## Work queue (in order)
 
@@ -545,9 +545,54 @@ failed".
      `reports/phase_5.md` is written; no fourth family, rescue revision or ML without the
      owner's separate authorisation.
    - Trial accounting: N = 66 + the vwap_reversion research trials actually recorded.
-3. **Next boundary not authorised.** The draft is not frozen. Not authorised: the optional
-   feasibility count (B1), the pinned-snapshot read and freeze (B2), implementation, tests,
-   traces, feasibility work, market-data, ledger, parity or sealed access, trials.
+3. **B1 feasibility diagnostic: authorised by the owner (2026-10-11)**, with six rulings on the
+   ambiguities the draft script raised. They are recorded in spec **draft revision 4**,
+   section 18c, and written into sections 5, 6.2 and 6.5. No trading rule changed.
+   - **R1 geometry precedence:** minimum, then cap, then `d_T < d_S`. The first failure is the
+     sole status and increments only its counter. `would_fail_*` combination flags are kept in
+     the CSV; they are not section 6.5 counters.
+   - **R2 life cycle:** one terminal outcome per setup, and breaking precedes replacement. A
+     same-side newer setup normally breaks the old one. `setups_replaced` counts only an
+     unbroken setup displaced. "Both" counts are non-normative diagnostics only.
+   - **R3 exact expiry:** at `Ts_old + 30` the old setup's final trigger and break come first.
+     If it is untriggered and unbroken, it expires; a new setup at that instant does not
+     replace it.
+   - **R4 setup at the spend:** a spend at T stops the session-date; a setup closing at T is
+     neither classified nor counted.
+   - **R5 ambiguous / regime-off:** after rules 1, 5 and 6: both sides → ambiguous, whatever
+     the regime; one side with the regime failing or ER unavailable → regime-off; one side
+     with the regime → setup. Mutually exclusive.
+   - **R6 final partition:** the 2025-09-30 UTC partition may be read with a predicate
+     excluding `open_time >= 2025-09-30T22:00:00Z`. The script asserts that no returned frame
+     holds such a row and reports only the excluded count per timeframe. No partition dated
+     2025-10-01 or later is opened.
+   - **Numerical:** `point` 0.01 and `trade_stops_level` 0 are provisional recorded inputs
+     copied from the frozen ORB spec, not a snapshot verification; B2 verifies both. The ER
+     denominator uses `math.fsum`. Official classifications use exact float64 comparisons;
+     comparisons within 1e-9 are reported separately and never change a classification.
+     Warm-up is exactly 13 H1 and 100 M15 bars, with no ten-day buffer. The output is
+     "geometry-eligible signals", never trades; 100 prior signals is necessary, not
+     sufficient, for selection.
+   - **Methodology commit** (this entry): spec revision 4, this STATUS entry, and
+     `scripts/vwap_reversion_feasibility.py` updated to the rulings, with **500 synthetic test
+     cases** run before any market data is read: R1–R6, classification boundaries, ER, ATR,
+     TWV, look-ahead, life cycle, geometry boundaries 499/500/2,000/2,001, `d_T = d_S − 1`,
+     the 9.75 USD bound, both sides, blackout, data gap, `twv_undefined`. A mutation check
+     (scratch, 21 targeted mutants, including each ruling reversed) caught all of them. One
+     further mutant was equivalent and is not counted: weight accumulated after a gap, when
+     TWV is undefined either way. The pre-ruling draft of the script was committed as
+     `7e11f46`.
+   - **Intended command:** `uv run --no-sync python scripts/vwap_reversion_feasibility.py`.
+     On the VM the equivalent `venv_exec.py` launch (spec 18c) is used, then a second run must
+     be byte-identical. Outputs:
+     `docs/strategies/evidence/vwap_reversion_2026-10-11_b1_feasibility.{md,csv}`. The CSV
+     schema is `variant, k_dev, er_max, scope, slice, metric, count` (spec 18c).
+   - **No market data had been read when this was committed.** B1 runs only from this clean
+     commit. If any script or rule change proves necessary after the data is opened, Claude
+     stops and reports it before editing or rerunning.
+   - **Not authorised:** B2 snapshot read, freeze, strategy implementation, registry or config
+     change, backtest, fill, exit, P&L, ledger access, trial, parity access, sealed-data
+     opening.
    - Approval boundaries B0–B9: spec section 18b.
    - **Tester parity remains an explicit owner decision at B5, before any trial** (Phase 3).
 
@@ -587,8 +632,8 @@ failed".
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
   Opening-range breakout: 0.1.0 frozen and implemented; its 12 development trials ran on
   2026-10-11; rejected by the owner on 2026-10-11 (queue A3). Then VWAP reversion: draft
-  0.1.0 revision 3, B0 decided 2026-10-11, not frozen, nothing beyond B0 authorised
-  (queue A4).
+  0.1.0 revision 4, B0 decided and B1 authorised 2026-10-11, not frozen, nothing beyond B1
+  authorised (queue A4).
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.

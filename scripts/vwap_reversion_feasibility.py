@@ -1,24 +1,30 @@
-"""vwap_reversion 0.1.0 draft revision 3: B1 feasibility counts (read-only, descriptive, no P&L).
+"""vwap_reversion 0.1.0 draft revision 4: B1 feasibility counts (read-only, descriptive, no P&L).
 
-Authorised by the owner at approval boundary B1 (2026-10-11) for the draft at
-af49da8a28a7ff4e9458b7ee1b312336c2d2a393. It applies the accepted revision-3 rules (spec
-sections 3-9 and 12) to development-period canonical bid bars and counts what they would do at
-all 12 declared points (variants m15 and m5, `k_dev` {1.0, 1.5, 2.0}, `er_max` {0.30, 0.50}):
-setup bars, the setup life cycle, the first-trigger spend, the stop and reward:risk checks, and
-the session-date statuses. It is not the strategy implementation and changes no rule.
+Authorised by the owner at approval boundary B1 (2026-10-11), with rulings R1-R6 and the
+numerical rulings recorded in spec section 18c. It applies the accepted rules (spec sections
+3-9 and 12) to development-period canonical bid bars and counts what they would do at all 12
+declared points (variants m15 and m5, `k_dev` {1.0, 1.5, 2.0}, `er_max` {0.30, 0.50}): setup
+bars, the setup life cycle, the first-trigger spend, the stop and reward:risk checks, and the
+session-date statuses. Its output is geometry-eligible signals, never trades. It is not the
+strategy implementation and changes no rule.
 
 Not done: no fill, exit, return, P&L or executable price (no tick and no ask is read); no trial,
-attempt or ledger access; no symbol snapshot (`point` and `trade_stops_level` are the values the
-frozen opening_range_breakout spec records from the pinned snapshot, section 8a); no sealed file
-(bar files are selected by name before any is opened, none dated after 2025-09-30); nothing is
-written except the two evidence files.
+attempt or ledger access; no symbol snapshot (`point` 0.01 and `trade_stops_level` 0 are
+provisional inputs copied from the frozen opening_range_breakout spec, sections 8 and 8a; B2
+verifies both); no partition dated after 2025-09-30 (files are selected by name before any is
+opened); nothing is written except the two evidence files.
 
-Every bar read names the instant it is made for and is refused if the bar closes after it. Each
-decision is also recomputed on a store physically truncated at that decision, and the spend
-instant is re-derived by an independent scan that never looks at the geometry.
+Before any market data is read, the script refuses to run unless the worktree is a clean commit
+(recorded as the methodology commit) and the spec is revision 4, runs its synthetic tests
+(`synthetic_tests`), and checks the access cut against the market calendar. Every bar read names
+the instant it is made for and is refused if the bar closes after it. Each decision is also
+recomputed on a store physically truncated at that decision, and the spend instant is
+re-derived by an independent scan that never looks at the geometry.
 
-Run from the repository root: ``uv run --no-sync python scripts/vwap_reversion_feasibility.py``.
-Writes docs/strategies/evidence/vwap_reversion_2026-10-11_b1_feasibility.{md,csv}.
+Run from the repository root: ``uv run --no-sync python scripts/vwap_reversion_feasibility.py``
+(``--synthetic-tests``: only the synthetic tests; no config, data or git access).
+Writes docs/strategies/evidence/vwap_reversion_2026-10-11_b1_feasibility.{md,csv}. CSV columns:
+variant, k_dev, er_max, scope, slice, metric, count (one row per count; spec section 18c).
 """
 
 # ruff: noqa: E501, I001  (report prose; aurum is imported before polars, see below)
@@ -29,7 +35,10 @@ import bisect
 import csv
 import hashlib
 import math
+import platform
+import subprocess
 import sys
+import tempfile
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
@@ -50,10 +59,12 @@ from aurum.settings import load_settings
 OUT = Path("docs/strategies/evidence")
 STEM = "vwap_reversion_2026-10-11_b1_feasibility"
 SPEC = Path("docs/strategies/vwap_reversion.md")
-SPEC_COMMIT = "af49da8a28a7ff4e9458b7ee1b312336c2d2a393"
-SPEC_BLOB = "41a5b7bb7efdfa749f8f9910d440979cfece39de"  # git blob of the spec at SPEC_COMMIT
+SPEC_BLOB = "22d1ffacaf618e39e687d77563b491a8d57809db"  # git blob of draft revision 4
 SYMBOL = "XAUUSD"
 FIRST, LAST = date(2020, 12, 15), date(2025, 9, 30)  # evaluated period (spec section 16)
+# Ruling R6: rows with open_time >= CUT (trading date 2025-10-01, held in the file dated LAST)
+# are excluded at load time; only their number per timeframe is reported.
+CUT = datetime(2025, 9, 30, 22, 0, tzinfo=UTC)
 FOLDS = (
     ("training", date(2020, 12, 15), date(2021, 9, 30)),
     ("fold 1", date(2021, 10, 1), date(2022, 9, 30)),
@@ -67,7 +78,7 @@ VARIANTS = {"m15": 15, "m5": 5}  # decision timeframe in minutes (section 6)
 K_DEV, ER_MAX = (1.0, 1.5, 2.0), (0.30, 0.50)  # declared grid (section 14)
 POINTS = tuple((k, e) for k in K_DEV for e in ER_MAX)
 DEFAULT = (1.5, 0.30)
-# Fixed rule constants of draft 0.1.0 revision 3 (section 14).
+# Fixed rule constants of draft 0.1.0 (section 14; unchanged in revision 4).
 WARMUP = {Timeframe.H1: 13, Timeframe.M15: 100}  # section 3.3, by bar count
 ER_BARS = 12  # section 4: 13 H1 closes
 ATR_PERIOD, ATR_BARS = 14, 100  # section 3.2 (RiskConfig.atr_period, engine.ATR_BARS)
@@ -79,12 +90,16 @@ MAX_HOLD = timedelta(minutes=90)  # section 10
 HOLD_BOUND = {"london_morning": time(12, 15), "ldn_ny_overlap": time(17, 45)}  # section 10.1
 BUFFER_POINTS, MIN_STOP_POINTS, CAP_POINTS = 25, 500, 2000  # sections 8, 8a
 NECESSARY_POINTS = 975  # section 13.1: TWV(T) - X >= 9.75 USD is necessary for a long signal
-# Recorded, not re-read: docs/strategies/opening_range_breakout.md section 8a (point) and its
-# feasibility note (trade_stops_level 0), both from the pinned snapshot 20261010T000046Z.json.
-# B1 forbids opening the snapshot; B2 re-reads both. The minimum is 500 for any stops level <= 490.
+# Provisional recorded B1 inputs (numerical ruling), copied from the frozen
+# docs/strategies/opening_range_breakout.md: point 0.01 (section 8a) and trade_stops_level 0
+# (section 8 feasibility note), both recorded there from the pinned snapshot
+# 20261010T000046Z.json. Not a snapshot verification: B1 does not open the snapshot; B2 verifies
+# both. The minimum is 500 for any stops level <= 490.
 POINT, STOPS_LEVEL_POINTS = 0.01, 0
 MIN_POINTS = max(MIN_STOP_POINTS, STOPS_LEVEL_POINTS + 10)
-NEAR = 1e-9  # a float comparison this close to its threshold is reported as near-boundary
+# Official classifications use exact float64 comparisons. A comparison this close to its
+# threshold is only reported (near_boundary_*); the tolerance never changes a classification.
+NEAR = 1e-9
 M5, M15, H1 = timedelta(minutes=5), timedelta(minutes=15), timedelta(hours=1)
 STATUSES = (
     "signal",
@@ -114,7 +129,20 @@ EXPECTED_SPAN = {  # first and last decision instant before blackout removal, Lo
     ("ldn_ny_overlap", 15): ("14:15", "16:15"),
     ("ldn_ny_overlap", 5): ("14:05", "16:15"),
 }
-FATES = ("triggered", "broken", "replaced", "expired")
+FATES = ("triggered", "broken", "replaced", "expired")  # CSV: setups_<fate>
+COUNTERS = (  # section 6.5 counter name -> Outcome field (setups and fates are listed apart)
+    ("ambiguous_setup", "ambiguous"),
+    ("setup_regime_off", "regime_off"),
+    ("data_gap", "data_gap"),
+    ("twv_undefined", "twv_undefined"),
+    ("zero_weight_bar", "zero_weight"),
+    ("blackout_skipped", "blackout_skipped"),
+)
+NONNORMATIVE = (
+    "nonnormative_new_setup_after_break",
+    "nonnormative_new_setup_after_break_same_instant",
+    "nonnormative_new_setup_at_expiry",
+)
 FORBIDDEN_MODULES = (
     "aurum.ledger",
     "aurum.backtest",
@@ -166,13 +194,14 @@ class Store:
         return self.m5(open_time, now) if step == 5 else self.m15(open_time, now)
 
     def atr(self, now: datetime) -> float | None:
-        """Section 3.2: ``indicators.atr`` over the 100 newest M15 bars closing at or before now."""
+        """Section 3.2: ``indicators.atr`` over exactly the 100 newest M15 bars closing at or
+        before now (the warm-up by bar count guarantees them; a shortfall stops the script)."""
         i = bisect.bisect_right(self._m15_open, now - M15)
-        if i:
-            self._guard(self._m15_open[i - 1] + M15, now)
-        lo = max(0, i - ATR_BARS)
+        if i < ATR_BARS:
+            raise AssertionError(f"only {i} M15 bars before {now}; warm-up needs {ATR_BARS}")
+        self._guard(self._m15_open[i - 1] + M15, now)
         h, low, c = self._m15_hlc
-        return atr(h[lo:i], low[lo:i], c[lo:i], ATR_PERIOD)
+        return atr(h[i - ATR_BARS : i], low[i - ATR_BARS : i], c[i - ATR_BARS : i], ATR_PERIOD)
 
     def er(self, now: datetime) -> float | None:
         """Section 4: efficiency ratio over the 13 newest H1 closes at or before now (bar
@@ -286,17 +315,22 @@ class Outcome:
     twv_undefined: int = 0
     zero_weight: int = 0
     blackout_skipped: int = 0
-    replaced_at_expiry: int = 0  # a new setup at exactly Ts_old + 30 (old counted expired)
-    replaced_after_break: int = 0  # a new setup while the old one was already broken
-    replaced_after_break_same_instant: int = 0  # ... broken at that same instant
+    # Non-normative diagnostics (ruling R2 allows them; not section 6.5 counters): a newer setup
+    # arriving at exactly Ts_old + 30 (the old one counts expired, R3), or while the old one was
+    # already broken (it counts broken, R2), or broken at that same instant.
+    nonnormative_new_setup_at_expiry: int = 0
+    nonnormative_new_setup_after_break: int = 0
+    nonnormative_new_setup_after_break_same_instant: int = 0
     spend: datetime | None = None
     setup: tuple[datetime, str] | None = None
     d_s: int | None = None
     d_t: int | None = None
     twv_gap: int | None = None  # TWV(T) - X (long) or Y - TWV(T) (short), in points
-    below_min: bool = False
-    above_cap: bool = False
-    rr_fail: bool = False
+    # Ruling R1: which geometry checks would fail at the spend, each regardless of precedence.
+    # Only the first failure (min, cap, rr) sets the status and its official counter.
+    would_fail_min: bool = False
+    would_fail_cap: bool = False
+    would_fail_rr: bool = False
     setup_twv_gap: int | None = None  # TWV(Ts) - X or Y - TWV(Ts) of the spent setup, points
     near: Counter[str] = field(default_factory=Counter)
 
@@ -447,15 +481,19 @@ def build_day(cal: Cal, store: Store, cutoff: datetime | None = None) -> Day:
 
 
 def classify(c: Candidate, k: float, er_max: float, near: Counter[str]) -> tuple[str, str | None]:
-    """Section 5 for one point. Proposed convention C5 (pending the owner's ruling): rules 1, 5
-    and 6 are prerequisites; both sides' rules 3-4 -> ambiguous (whatever the regime); one side
-    with rule 2 failing -> regime_off; one side with rule 2 -> setup."""
+    """Section 5 for one point, ruling R5 (mutually exclusive): rules 1, 5 and 6 are
+    prerequisites (rule 1 holds for every candidate); both sides' rules 3-4 -> ambiguous,
+    whatever the regime; exactly one side with rule 2 failing or ER unavailable -> regime_off;
+    exactly one side with rule 2 -> setup."""
     if not c.read_ok or c.blackout:
         return "ineligible", None
     dev_l, dev_s, need = c.twv - c.x, c.y - c.twv, k * c.atr
     for dev in (dev_l, dev_s):
         if abs(dev - need) < NEAR:
             near["deviation"] += 1
+    for a, b in ((c.x, c.prior_low), (c.y, c.prior_high)):
+        if abs(a - b) < NEAR:
+            near["extreme"] += 1
     long_ = c.x < c.prior_low and dev_l >= need
     short = c.y > c.prior_high and dev_s >= need
     if long_ and short:
@@ -486,11 +524,14 @@ def walk(cal: Cal, day: Day, store: Store, step: int, k: float, er_max: float) -
     Order inside an instant T (each close of the variant's timeframe):
       1. the active setup's break check by the decision bar closing at T (trigger rule 3);
       2. a decision instant evaluates rules 2-6 and spends; a blackout close counts
-         ``blackout_skipped`` if rules 2-6 hold;
-      3. the active setup expires at Ts + 30 (proposed convention C3);
-      4. a setup closing at T is counted and replaces the active one (counters only while
-         unspent, so not after a spend at T: proposed convention C4).
-    A setup has one fate, the first in time; at one instant broken before replaced (C2).
+         ``blackout_skipped`` if rules 2-6 hold; a spend ends the session-date at T, so a
+         setup bar also closing at T is neither classified nor counted (ruling R4);
+      3. at T = Ts + 30, a setup still untriggered and unbroken after steps 1-2 counts expired
+         (ruling R3);
+      4. a setup closing at T is counted and becomes active for later instants; it replaces
+         the active setup only if that one is unbroken and has not expired (R2, R3).
+    A setup has one terminal outcome, the first in time: triggered, broken, replaced or
+    expired; at one instant breaking precedes replacement (ruling R2).
     """
     out = Outcome()
     st = timedelta(minutes=step)
@@ -514,6 +555,8 @@ def walk(cal: Cal, day: Day, store: Store, step: int, k: float, er_max: float) -
         assert p is not None, (cal.day, cal.session, t)
         if abs(d[2] - tw) < NEAR:
             out.near["room"] += 1
+        if abs(d[2] - (p[0] if active.side == "long" else p[1])) < NEAR:
+            out.near["rejection"] += 1
         if active.side == "long":
             return d[2] > p[0] and d[2] < tw
         return d[2] < p[1] and d[2] > tw
@@ -521,6 +564,9 @@ def walk(cal: Cal, day: Day, store: Store, step: int, k: float, er_max: float) -
     while t <= last:
         if active is not None and active.ts < t:  # 1. trigger rule 3, every decision bar
             d = store.bar(step, t - st, now=t)
+            level_side = 1 if active.side == "long" else 0
+            if not active.broken and d is not None and abs(d[level_side] - active.level) < NEAR:
+                out.near["break"] += 1
             passes = d is not None and (
                 d[1] < active.level if active.side == "long" else d[0] > active.level
             )
@@ -560,10 +606,10 @@ def walk(cal: Cal, day: Day, store: Store, step: int, k: float, er_max: float) -
                     active.fate = "replaced"
                     out.fates["replaced"] += 1
                 elif old is not None and old.fate == "broken":
-                    out.replaced_after_break += 1
-                    out.replaced_after_break_same_instant += old.broken_at == t
+                    out.nonnormative_new_setup_after_break += 1
+                    out.nonnormative_new_setup_after_break_same_instant += old.broken_at == t
                 elif dropped is not None and dropped.fate == "expired":
-                    out.replaced_at_expiry += 1
+                    out.nonnormative_new_setup_at_expiry += 1
                 active = Active(t, side, c.x if side == "long" else c.y)  # type: ignore[arg-type]
                 out.setups[side] += 1
                 out.counted.append((t, side))
@@ -587,8 +633,9 @@ def walk(cal: Cal, day: Day, store: Store, step: int, k: float, er_max: float) -
 def spend(
     out: Outcome, cal: Cal, day: Day, store: Store, step: int, t: datetime, active: Active
 ) -> None:
-    """Section 6.3 then sections 8, 8a and 9 at the spend instant t. Proposed convention C1:
-    checked in the order minimum, cap, reward:risk; the status is the first failure."""
+    """Section 6.3 then sections 8, 8a and 9 at the spend instant t. Ruling R1: evaluated in
+    the order minimum, cap, reward:risk; the first failure is the sole status (and official
+    counter); every failing check is kept as a would_fail_* flag."""
     d = store.bar(step, t - timedelta(minutes=step), now=t)
     assert d is not None
     ref, tw = d[2], day.twv[t]
@@ -608,16 +655,16 @@ def spend(
         out.d_t = round((ref - target) / POINT)
         out.twv_gap = math.floor(round((active.level - tw) / POINT, 6))
         out.setup_twv_gap = math.floor(round((active.level - setup_twv) / POINT, 6))
-    out.below_min = out.d_s < MIN_POINTS
-    out.above_cap = out.d_s > CAP_POINTS
-    out.rr_fail = out.d_t < out.d_s
+    out.would_fail_min = out.d_s < MIN_POINTS
+    out.would_fail_cap = out.d_s > CAP_POINTS
+    out.would_fail_rr = out.d_t < out.d_s
     out.status = (
         "stop_below_minimum"
-        if out.below_min
+        if out.would_fail_min
         else "stop_above_cap"
-        if out.above_cap
+        if out.would_fail_cap
         else "reward_risk_below_min"
-        if out.rr_fail
+        if out.would_fail_rr
         else "signal"
     )
     out.spend, out.setup = t, (active.ts, active.side)
@@ -666,14 +713,567 @@ def files_digest(hashes: dict[Path, str]) -> str:
     return h.hexdigest()
 
 
-def git_blob(path: Path) -> str:
-    data = path.read_bytes()
-    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+def git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+
+
+def methodology_commit() -> str:
+    """The run must start from a clean commit: no tracked change and no untracked file except
+    this script's own two outputs (present on the byte-identity rerun). Returns HEAD."""
+    outputs = {f"{OUT.as_posix()}/{STEM}.{ext}" for ext in ("md", "csv")}
+    dirty = [
+        line
+        for line in git("status", "--porcelain", "--untracked-files=all").splitlines()
+        if not (line.startswith("?? ") and line[3:] in outputs)
+    ]
+    if dirty:
+        raise SystemExit(f"worktree is not a clean commit: {dirty}")
+    if git("hash-object", SPEC.as_posix()) != SPEC_BLOB:
+        raise SystemExit(f"{SPEC} is not draft revision 4 (blob {SPEC_BLOB})")
+    return git("rev-parse", "HEAD")
+
+
+def load_bars(paths: list[Path]) -> tuple[pl.DataFrame, int, int]:
+    """Ruling R6: each file is scanned with the predicate open_time < CUT. Returns the frame,
+    the files' total row count (Parquet metadata) and the number of rows excluded; the excluded
+    rows' values are never collected."""
+    cols = ["open_time", "high", "low", "close", "tick_count"]
+    cut = pl.lit(CUT, dtype=pl.Datetime("ms", "UTC"))
+    parts, total = [], 0
+    for p in paths:
+        lf = pl.scan_parquet(p)
+        total += int(lf.select(pl.len()).collect().item())
+        parts.append(lf.filter(pl.col("open_time") < cut).select(cols).collect())
+    frame = pl.concat(parts)
+    if frame.filter(pl.col("open_time") >= cut).height:
+        raise AssertionError(f"a returned frame holds a row at or after {CUT}")
+    return frame, total, total - frame.height
+
+
+def verify(
+    cal: Cal, day: Day, store: Store, step: int, k: float, e: float, o: Outcome, checks: Counter
+) -> None:
+    """Invariants of one walk, independent of the walk's own bookkeeping."""
+    full = setups_of(day, k, e)
+    # spend = the first instant meeting rules 1-6, re-derived without geometry
+    assert first_trigger(cal, day, store, step, full) == o.spend, (cal, step, k, e)
+    checks["spend re-derived independently"] += 1
+    # counted setups = the shared setup list truncated at this variant's spend (ruling R4)
+    expect = [(ts, sd) for ts, (sd, _) in sorted(full.items())]
+    expect = [x for x in expect if o.spend is None or x[0] < o.spend]
+    assert o.counted == expect, (cal, step, k, e)
+    checks["counted setups = shared list up to the spend"] += 1
+    assert sum(o.fates.values()) == len(o.counted), (cal, step, k, e)
+    assert o.fates["triggered"] == (o.spend is not None)
+    assert o.spend is None or o.spend not in cal.blackout[step]
+    assert o.spend is None or o.spend < day.first_gap
+    assert (o.spend is None) == (o.status not in SPENT)
+    if o.status == "signal":
+        assert o.twv_gap is not None
+        assert o.twv_gap >= NECESSARY_POINTS, (cal, step, k, e)
+
+
+# Synthetic tests: run before any market data is read (and alone with --synthetic-tests). They
+# use hand-built bars only: no config, data directory, git or snapshot.
+
+_D0 = datetime(2021, 1, 5, tzinfo=UTC)  # a UK-winter Tuesday: London = UTC, A = 07:00Z
+
+
+def _t(hm: str) -> datetime:
+    h, m = hm.split(":")
+    return _D0.replace(hour=int(h), minute=int(m))
+
+
+def _syn_cal(blackout: dict[int, tuple[str, ...]] | None = None, decisions: bool = True) -> Cal:
+    """london_morning 07:00-11:00Z with the decision instants of section 6.1, minus `blackout`."""
+    a, e = _t("07:00"), _t("11:00")
+    decision: dict[int, tuple[datetime, ...]] = {}
+    removed: dict[int, frozenset[datetime]] = {}
+    for step in VARIANTS.values():
+        st = timedelta(minutes=step)
+        removed[step] = frozenset(_t(x) for x in (blackout or {}).get(step, ()))
+        full, t = [], a + SETUP_FROM + st
+        while t <= e - LAST_DECISION:
+            full.append(t)
+            t += st
+        decision[step] = tuple(t for t in full if t not in removed[step]) if decisions else ()
+    closes = tuple(a + SETUP_FROM + i * M15 for i in range(10))  # 08:00 ... 10:15
+    return Cal(
+        _D0.date(),
+        "london_morning",
+        a,
+        e,
+        "normal",
+        decision,
+        removed,
+        0,
+        closes,
+        frozenset(),
+        True,
+        False,
+    )
+
+
+def _syn_store_from(m5: dict[datetime, Bar], *, trend: bool = False, history: int = 120) -> Store:
+    """Session M15 bars aggregated from the M5 bars present; `history` M15 bars before A with
+    true range 1; 24 H1 bars (20 before A) with closes alternating (ER 0) or rising (ER 1)."""
+    m15: dict[datetime, Bar] = {
+        _t("07:00") - (i + 1) * M15: (2000.5, 1999.5, 2000.0, 1000) for i in range(history)
+    }
+    o = _t("07:00")
+    while o < _t("11:00"):
+        bars = [m5[o + i * M5] for i in range(3) if o + i * M5 in m5]
+        if bars:
+            m15[o] = (
+                max(b[0] for b in bars),
+                min(b[1] for b in bars),
+                bars[-1][2],
+                sum(b[3] for b in bars),
+            )
+        o += M15
+    m15_open = sorted(m15)
+    hlc = tuple(np.array([m15[x][i] for x in m15_open], dtype=np.float64) for i in range(3))
+    h1_open = [_t("07:00") + (i - 20) * H1 for i in range(24)]
+    h1_close = [2000.0 + (i if trend else 0.5 * (i % 2)) for i in range(24)]
+    return Store(m5, m15, m15_open, hlc, h1_open, h1_close)  # type: ignore[arg-type]
+
+
+def _syn_store(
+    shapes: dict[str, tuple[float, float, float]],
+    base: tuple[float, float, float] = (2000.5, 1999.5, 2000.0),
+    *,
+    missing: tuple[str, ...] = (),
+    weightless: bool = False,
+    trend: bool = False,
+) -> Store:
+    """Session M15 shapes (high, low, close) by open time, each split into three M5 bars
+    (h c c, c l c, c c c). Slots before the first shape are `base` bars (weight 1000, or 0 if
+    `weightless`); slots after it are flat at the previous close. Shape and flat bars weigh 0,
+    so TWV is exactly the base typical price. `missing` M5 slots are left out."""
+    m5: dict[datetime, Bar] = {}
+    prev: float | None = None
+    o = _t("07:00")
+    while o < _t("11:00"):
+        key = f"{o:%H:%M}"
+        if key in shapes:
+            h, lo, c = shapes[key]
+            parts, w, prev = [(h, c, c), (c, lo, c), (c, c, c)], 0, c
+        elif prev is None:
+            parts, w = [base] * 3, 0 if weightless else 1000
+        else:
+            parts, w = [(prev, prev, prev)] * 3, 0
+        for i, (h, lo, c) in enumerate(parts):
+            if f"{o + i * M5:%H:%M}" not in missing:
+                m5[o + i * M5] = (h, lo, c, w)
+        o += M15
+    return _syn_store_from(m5, trend=trend)
+
+
+def _syn_run(cal: Cal, store: Store, step: int, k: float = 1.5, e: float = 0.30) -> Outcome:
+    """The walk plus every invariant the real run checks, including the truncated store."""
+    day = build_day(cal, store)
+    o = walk(cal, day, store, step, k, e)
+    verify(cal, day, store, step, k, e, o, Counter())
+    cutoff = o.spend or cal.e - LAST_DECISION
+    small = store.truncated(cal.a, cutoff)
+    assert walk(cal, build_day(cal, small, cutoff), small, step, k, e) == o, "truncated store"
+    return o
+
+
+def synthetic_tests() -> int:
+    """Rules, rulings R1-R6 and the numerical rulings on hand-built bars. Returns the number of
+    cases; any failure raises and stops the script before market data is read."""
+    n = 0
+
+    def check(name: str, got: object, want: object) -> None:
+        nonlocal n
+        assert got == want, f"synthetic test {name}: got {got!r}, expected {want!r}"
+        n += 1
+
+    # R5 classification, exact comparisons, near-boundary reporting.
+    def cand(**kw: object) -> Candidate:
+        v = {
+            "x": 1997.0,
+            "y": 2001.0,
+            "prior_low": 1998.0,
+            "prior_high": 2002.0,
+            "twv": 2000.0,
+            "atr": 2.0,
+            "er": 0.2,
+        }
+        v.update(kw)
+        return Candidate(
+            _t("08:00"), bool(v.pop("read_ok", True)), bool(v.pop("blackout", False)), **v
+        )  # type: ignore[arg-type]
+
+    near: Counter[str] = Counter()
+    check(
+        "R5 deviation equal to k x ATR passes", classify(cand(), 1.5, 0.30, near), ("setup", "long")
+    )
+    check("near-boundary deviation reported", near["deviation"], 1)
+    for name, kw, er_max, want in (
+        ("equal to the prior low fails", {"x": 1998.0, "twv": 2001.0}, 0.30, ("no_side", None)),
+        (
+            "equal to the prior high fails",
+            {"x": 1999.0, "y": 2002.0, "twv": 1999.0},
+            0.30,
+            ("no_side", None),
+        ),
+        ("deviation 0.01 short fails", {"x": 1997.01}, 0.30, ("no_side", None)),
+        ("ER equal to er_max passes", {"er": 0.30}, 0.30, ("setup", "long")),
+        ("ER equal to er_max 0.50 passes", {"er": 0.50}, 0.50, ("setup", "long")),
+        ("R5 one side, regime fails", {"er": 0.31}, 0.30, ("regime_off", "long")),
+        ("R5 one side, ER unavailable", {"er": None}, 0.30, ("regime_off", "long")),
+        ("short side", {"x": 1999.0, "y": 2003.0}, 0.30, ("setup", "short")),
+        ("R5 both sides", {"y": 2003.0}, 0.30, ("ambiguous", None)),
+        ("R5 both sides, ER unavailable", {"y": 2003.0, "er": None}, 0.30, ("ambiguous", None)),
+        ("R5 both sides, regime fails", {"y": 2003.0, "er": 0.9}, 0.30, ("ambiguous", None)),
+        ("R5 rule 5 fails first", {"y": 2003.0, "read_ok": False}, 0.30, ("ineligible", None)),
+        ("R5 rule 6 fails first", {"y": 2003.0, "blackout": True}, 0.30, ("ineligible", None)),
+    ):
+        check(name, classify(cand(**kw), 1.5, er_max, Counter()), want)
+
+    # ER (13 H1 closes, path with math.fsum), ATR over exactly 100 bars, look-ahead guard.
+    def h1_store(closes: list[float]) -> Store:
+        opens = [_t("08:00") - (len(closes) - i) * H1 for i in range(len(closes))]
+        return Store({}, {}, [], (np.zeros(0), np.zeros(0), np.zeros(0)), opens, closes)
+
+    alt = [2000.0, 2001.0] * 6
+    check("ER hand value", h1_store([*alt, 2003.0]).er(_t("08:00")), 3 / 13)
+    check("ER uses only the 13 newest", h1_store([1900.0, *alt, 2003.0]).er(_t("08:00")), 3 / 13)
+    check("ER needs 13 closes", h1_store([*alt]).er(_t("08:00")), None)
+    check("ER zero path", h1_store([2000.0] * 13).er(_t("08:00")), None)
+    check("ER trending store", _syn_store({}, trend=True).er(_t("08:00")), 1.0)
+    check("ER alternating store", _syn_store({}).er(_t("08:00")), 0.0)
+    m15o = [_t("07:00") - (150 - i) * M15 for i in range(150)]
+    hi = np.array([2000.0 + (i % 7) for i in range(150)])
+    lo = hi - np.array([1.0 + (i % 5) for i in range(150)])
+    cl = (hi + lo) / 2
+    s150 = Store({}, {}, m15o, (hi, lo, cl), [], [])
+    check(
+        "ATR over exactly the 100 newest",
+        s150.atr(_t("07:00")),
+        atr(hi[50:], lo[50:], cl[50:], ATR_PERIOD),
+    )
+    check("ATR window matters", s150.atr(_t("07:00")) != atr(hi, lo, cl, ATR_PERIOD), True)
+    check(
+        "ATR ignores bars closing after now",
+        s150.atr(_t("06:45")),
+        atr(hi[49:149], lo[49:149], cl[49:149], ATR_PERIOD),
+    )
+    for name, fn in (
+        (
+            "ATR shortfall stops",
+            lambda: Store({}, {}, m15o[:99], (hi[:99], lo[:99], cl[:99]), [], []).atr(_t("07:00")),
+        ),
+        ("look-ahead read refused", lambda: _syn_store({}).m5(_t("08:00"), now=_t("08:04"))),
+    ):
+        try:
+            fn()
+        except AssertionError:
+            check(name, True, True)
+        else:
+            raise AssertionError(f"synthetic test {name}: no error")
+
+    # TWV (section 3.1): slots [A, t), fsum / integer weights, zero weights, a missing slot.
+    m5: dict[datetime, Bar] = {}
+    for i in range(48):
+        p = 2000.0 + (i % 9) * 0.37
+        m5[_t("07:00") + i * M5] = (p + 0.4, p - 0.3, p, i % 4)
+    del m5[_t("08:30")]
+    day = build_day(_syn_cal(), _syn_store_from(m5))
+    for hm in ("07:05", "07:10", "08:00", "08:30"):
+        t = _t(hm)
+        bars = [m5[o] for o in sorted(m5) if o + M5 <= t]
+        w = sum(b[3] for b in bars)
+        want = math.fsum(b[3] * ((b[0] + b[1] + b[2]) / 3) for b in bars) / w if w else None
+        check(f"TWV at {hm}", day.twv[t], want)
+    check("TWV undefined with zero weight", day.twv[_t("07:05")], None)
+    check("TWV undefined after a missing slot", day.twv[_t("08:35")], None)
+    check("first gap", day.first_gap, _t("08:35"))
+    check(
+        "zero-weight bars",
+        len(day.zero_weight),
+        sum(1 for o, b in m5.items() if b[3] == 0 and o + M5 <= _t("10:45")),
+    )
+
+    # R6: the load predicate excludes open_time >= CUT and only counts what it excludes.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+        path = Path(tmp) / "2025-09-30.parquet"
+        schema = {
+            "open_time": pl.Datetime("ms", "UTC"),
+            "high": pl.Float64,
+            "low": pl.Float64,
+            "close": pl.Float64,
+            "tick_count": pl.Int64,
+        }
+        rows = [(CUT + i * M5, 1.0, 1.0, 1.0, 1) for i in (-2, -1, 0, 1)]
+        pl.DataFrame(rows, schema=schema, orient="row").write_parquet(path)
+        frame, total, excluded = load_bars([path])
+        check("R6 rows read / excluded", (total, excluded, frame.height), (4, 2, 2))
+        check("R6 nothing at or after the cut", frame["open_time"].max() < CUT, True)  # type: ignore[operator]
+
+    # Walk scenarios: R1-R4, geometry boundaries, both sides, statuses (spec 6.2, 6.3, 6.5, 8, 9).
+    pre, setup = {"07:30": (2000.0, 1990.0, 1990.5)}, {"07:45": (1989.5, 1985.0, 1986.0)}
+    long_ = {**pre, **setup}  # long setup at Ts 08:00, X = 1985.00
+    trig = {"08:00": (1990.5, 1986.0, 1990.0)}  # rejection: m15 at 08:15, m5 at 08:05
+    flat86 = {"08:00": (1986.0, 1986.0, 1986.0)}
+    off_grid = (2000.51, 1999.5, 2000.0)  # typical price 2000.00333...
+
+    def sig(
+        spend: dict[int, str], d_s: int = 525, d_t: int = 1000, side: str = "long"
+    ) -> dict[str, object]:
+        return {
+            "status": "signal",
+            "spend": spend,
+            "d_s": d_s,
+            "d_t": d_t,
+            "setups": {side: 1},
+            "fates": {"triggered": 1},
+        }
+
+    def geo(status: str, d_s: int, d_t: int, flags: tuple[bool, bool, bool]) -> dict[str, object]:
+        return {
+            "status": status,
+            "spend": {15: "08:15", 5: "08:05"},
+            "d_s": d_s,
+            "d_t": d_t,
+            "flags": flags,
+        }
+
+    def lb(
+        low: float, base: float, trigger: tuple[float, float, float] = trig["08:00"]
+    ) -> dict[str, object]:
+        return {
+            "shapes": {
+                "07:30": (base, 1990.0, 1990.5),
+                "07:45": (1989.5, low, 1986.0),
+                "08:00": trigger,
+            }
+        }
+
+    early = {15: "08:15", 5: "08:05"}
+    scenarios: list[tuple[str, dict[str, object], dict[str, object], dict[str, object]]] = [
+        ("long signal", {"shapes": {**long_, **trig}}, {}, sig(early)),
+        (
+            "long signal, floor of an off-grid TWV",
+            {"shapes": {**long_, **trig}, "base": off_grid},
+            {},
+            sig(early),
+        ),
+        (
+            "short signal, ceil of an off-grid TWV",
+            {
+                "shapes": {
+                    "07:30": (2010.0, 2000.0, 2009.5),
+                    "07:45": (2015.0, 2010.5, 2014.0),
+                    "08:00": (2014.0, 2009.0, 2010.0),
+                },
+                "base": off_grid,
+            },
+            {},
+            sig(early, d_t=999, side="short"),
+        ),
+        (
+            "R2 a same-side newer setup breaks the old one",
+            {"shapes": {**long_, "08:00": (1986.0, 1983.0, 1984.0)}},
+            {},
+            {
+                "status": "no_trigger",
+                "setups": {"long": 2},
+                "fates": {"broken": 1, "expired": 1},
+                "nonnormative_new_setup_after_break": 1,
+                "nonnormative_new_setup_after_break_same_instant": {15: 1, 5: 0},
+            },
+        ),
+        (
+            "R2 an opposite-side newer setup replaces an unbroken one",
+            {"shapes": {**long_, "08:00": (2015.0, 1986.0, 2010.0)}},
+            {},
+            {
+                "status": "no_trigger",
+                "setups": {"long": 1, "short": 1},
+                "fates": {"replaced": 1, "expired": 1},
+            },
+        ),
+        (
+            "R3 expiry at Ts + 30, a new setup then does not replace",
+            {"shapes": {**long_, **flat86, "08:15": (2015.0, 1986.0, 2010.0)}},
+            {},
+            {
+                "status": "no_trigger",
+                "setups": {"long": 1, "short": 1},
+                "fates": {"expired": 2},
+                "nonnormative_new_setup_at_expiry": 1,
+            },
+        ),
+        (
+            "R3 final trigger at Ts + 30; R4 a setup closing at the spend is not counted",
+            {"shapes": {**long_, **flat86, "08:15": (2015.0, 1986.0, 1990.0)}},
+            {},
+            sig({15: "08:30", 5: "08:20"}),
+        ),
+        (
+            "a bar touching X exactly does not break the setup",
+            {
+                "shapes": {
+                    **long_,
+                    "08:00": (1986.0, 1985.0, 1986.0),
+                    "08:15": (1990.5, 1986.0, 1990.0),
+                }
+            },
+            {},
+            {**sig({15: "08:30", 5: "08:20"}), "near_break": 1},
+        ),
+        (
+            "R1 below the minimum",
+            {"shapes": {**long_, "08:00": (1989.7, 1986.0, 1989.7)}},
+            {},
+            geo("stop_below_minimum", 495, 1030, (True, False, False)),
+        ),
+        (
+            "R1 below the minimum and reward:risk: minimum first",
+            {**lb(1985.0, 1994.0, (1989.7, 1986.0, 1989.7)), "base": (1994.5, 1993.5, 1994.0)},
+            {},
+            geo("stop_below_minimum", 495, 430, (True, False, True)),
+        ),
+        (
+            "R1 reward:risk only",
+            {**lb(1985.0, 1994.0), "base": (1994.5, 1993.5, 1994.0)},
+            {},
+            geo("reward_risk_below_min", 525, 400, (False, False, True)),
+        ),
+        (
+            "R1 above the cap and reward:risk: cap first",
+            {**lb(1965.0, 2000.0)},
+            {},
+            geo("stop_above_cap", 2525, 1000, (False, True, True)),
+        ),
+        (
+            "d_S = d_T = 500 and TWV(T) - X = 9.75 USD",
+            {**lb(1985.25, 1995.0), "base": (1995.5, 1994.5, 1995.0)},
+            {},
+            {**geo("signal", 500, 500, (False, False, False)), "twv_gap": 975},
+        ),
+        (
+            "d_S = 499",
+            {**lb(1985.26, 1995.0), "base": (1995.5, 1994.5, 1995.0)},
+            {},
+            geo("stop_below_minimum", 499, 500, (True, False, False)),
+        ),
+        (
+            "d_T = d_S - 1 (float-noise target)",
+            {**lb(1985.25, 1994.99), "base": (1995.49, 1994.49, 1994.99)},
+            {},
+            geo("reward_risk_below_min", 500, 499, (False, False, True)),
+        ),
+        (
+            "d_S = d_T = 2,000",
+            {**lb(1970.25, 2010.0, (1990.5, 1971.0, 1990.0)), "base": (2010.5, 2009.5, 2010.0)},
+            {},
+            geo("signal", 2000, 2000, (False, False, False)),
+        ),
+        (
+            "d_S = 2,001",
+            {**lb(1970.24, 2010.0, (1990.5, 1971.0, 1990.0)), "base": (2010.5, 2009.5, 2010.0)},
+            {},
+            geo("stop_above_cap", 2001, 2000, (False, True, True)),
+        ),
+        (
+            "blackout instant: skipped, never spends",
+            {"shapes": {**long_, **trig}},
+            {"blackout": {15: ("08:15",), 5: ("08:05",)}},
+            {
+                "status": "no_trigger",
+                "spend": None,
+                "blackout_skipped": 1,
+                "setups": {"long": 1},
+                "fates": {"expired": 1},
+            },
+        ),
+        (
+            "missing M5 slot: data_gap at every later decision instant",
+            {"shapes": {**long_, **trig}, "missing": ("08:00",)},
+            {},
+            {
+                "status": "data_gap",
+                "data_gap": {15: 11, 5: 33},
+                "setups": {"long": 1},
+                "fates": {"expired": 1},
+            },
+        ),
+        (
+            "zero total weight: twv_undefined",
+            {"shapes": {}, "weightless": True},
+            {},
+            {
+                "status": "twv_undefined",
+                "twv_undefined": {15: 11, 5: 33},
+                "zero_weight": 45,
+                "setups": {},
+            },
+        ),
+        (
+            "R5 regime off (trending H1)",
+            {"shapes": {**long_, **trig}, "trend": True},
+            {},
+            {"status": "no_trigger", "regime_off": 1, "ambiguous": 0, "setups": {}},
+        ),
+        (
+            "R5 ambiguous",
+            {"shapes": {"07:45": (2015.0, 1985.0, 2000.0)}},
+            {},
+            {"status": "no_trigger", "ambiguous": 1, "regime_off": 0, "setups": {}},
+        ),
+        (
+            "R5 ambiguous regardless of the regime",
+            {"shapes": {"07:45": (2015.0, 1985.0, 2000.0)}, "trend": True},
+            {},
+            {"status": "no_trigger", "ambiguous": 1, "regime_off": 0, "setups": {}},
+        ),
+        (
+            "no decision instant",
+            {"shapes": {**long_, **trig}},
+            {"decisions": False},
+            {"status": "no_decision_time", "spend": None},
+        ),
+    ]
+    for name, store_kw, cal_kw, want in scenarios:
+        store = _syn_store(**store_kw)  # type: ignore[arg-type]
+        cal = _syn_cal(**cal_kw)  # type: ignore[arg-type]
+        for v, step in VARIANTS.items():
+            for e in ER_MAX:
+                o = _syn_run(cal, store, step, 1.5, e)
+                for key, value in want.items():
+                    value = (
+                        value.get(step, value)
+                        if isinstance(value, dict) and set(value) <= {5, 15} and value
+                        else value
+                    )
+                    if key == "spend" and value is not None:
+                        value = _t(value)  # type: ignore[arg-type]
+                    got = (
+                        (o.would_fail_min, o.would_fail_cap, o.would_fail_rr)
+                        if key == "flags"
+                        else o.near["break"]
+                        if key == "near_break"
+                        else getattr(o, key)
+                    )
+                    check(f"{name} [{v}, er_max {e}] {key}", got, value)
+    return n
 
 
 def main() -> int:
-    if git_blob(SPEC) != SPEC_BLOB:
-        raise SystemExit(f"{SPEC} is not the accepted revision 3 ({SPEC_COMMIT})")
+    if sys.argv[1:] == ["--synthetic-tests"]:
+        print(f"synthetic tests passed: {synthetic_tests()} cases")
+        return 0
+    if sys.argv[1:]:
+        raise SystemExit(f"unknown arguments {sys.argv[1:]}")
+    # Gates before any market data is read: clean commit and spec, synthetic tests, config.
+    commit = methodology_commit()
+    synthetic = synthetic_tests()
     settings = load_settings()
     cfg = settings.config
     layout = DataLayout(settings.data_dir)
@@ -689,12 +1289,13 @@ def main() -> int:
     market = MarketHours(cfg.data.market)
     calendar = TradingCalendar(cfg.sessions, market)
     news = NewsBlackout(nb)
-    # Bars of trading date LAST + 1 start at its market open (22:00Z); the file dated LAST holds
-    # them from then on. Proposed convention C6: they are excluded in the scan, never used.
-    cut = market.session(LAST + timedelta(days=1)).open  # type: ignore[union-attr]
+    # R6's cut is the market open of trading date LAST + 1 (calendar config only, no data).
+    if market.session(LAST + timedelta(days=1)).open != CUT:  # type: ignore[union-attr]
+        raise SystemExit(f"market open of {LAST + timedelta(days=1)} is not {CUT}")
 
-    # File selection by name only (row counts from Parquet metadata for the warm-up); nothing
-    # dated after LAST is ever opened.
+    # File selection by name only (row counts from Parquet metadata for the warm-up); no
+    # partition dated after LAST is ever opened. Warm-up exactly by bar count (13 H1, 100 M15):
+    # the fewest whole days before FIRST holding that many bars; no calendar-day buffer.
     selected: dict[Timeframe, list[date]] = {}
     for tf in (Timeframe.M5, Timeframe.M15, Timeframe.H1):
         days = [d for d in days_in(layout.canonical_bars_dir(SYMBOL, tf)) if d <= LAST]
@@ -716,25 +1317,16 @@ def main() -> int:
 
     frames: dict[Timeframe, pl.DataFrame] = {}
     rows_total: dict[Timeframe, int] = {}
-    cols = ["open_time", "high", "low", "close", "tick_count"]
+    excluded: dict[Timeframe, int] = {}
     for tf, ps in paths.items():
-        parts, total = [], 0
-        for p in ps:
-            lf = pl.scan_parquet(p)
-            total += int(lf.select(pl.len()).collect().item())
-            parts.append(
-                lf.filter(pl.col("open_time") < pl.lit(cut, dtype=pl.Datetime("ms", "UTC")))
-                .select(cols)
-                .collect()
-            )
-        frames[tf], rows_total[tf] = pl.concat(parts), total
-    excluded = {tf: rows_total[tf] - frames[tf].height for tf in frames}
+        frames[tf], rows_total[tf], excluded[tf] = load_bars(ps)
     null_ticks = int(frames[Timeframe.M5]["tick_count"].null_count())
 
     def as_dict(f: pl.DataFrame) -> dict[datetime, Bar]:
         out: dict[datetime, Bar] = {}
         for o, h, lo, c, w in f.iter_rows():
             assert o not in out, o
+            assert o < CUT, "row at or after the R6 cut"
             out[o.astimezone(UTC)] = (h, lo, c, 0 if w is None else int(w))
         return out
 
@@ -766,7 +1358,7 @@ def main() -> int:
     keys = [(v, k, e) for v in VARIANTS for k, e in POINTS]
     results: dict[tuple[str, float, float], list[Outcome]] = {key: [] for key in keys}
     days: list[Day] = []
-    checks = Counter()
+    checks: Counter[str] = Counter()
     for cal in cals:
         day = build_day(cal, store)
         days.append(day)
@@ -776,21 +1368,7 @@ def main() -> int:
                 o = walk(cal, day, store, step, k, e)
                 results[(v, k, e)].append(o)
                 outs[(k, e)] = o
-                full = setups_of(day, k, e)
-                # spend = the first instant meeting rules 1-6, re-derived without geometry
-                assert first_trigger(cal, day, store, step, full) == o.spend, (cal, v, k, e)
-                checks["spend re-derived independently"] += 1
-                # counted setups = the shared setup list truncated at this variant's spend
-                expect = [(ts, sd) for ts, (sd, _) in sorted(full.items())]
-                expect = [x for x in expect if o.spend is None or x[0] < o.spend]
-                assert o.counted == expect, (cal, v, k, e)
-                checks["counted setups = shared list up to the spend"] += 1
-                assert sum(o.fates.values()) == len(o.counted), (cal, v, k, e)
-                assert o.spend is None or o.spend not in cal.blackout[step]
-                assert o.spend is None or o.spend < day.first_gap
-                if o.status == "signal":
-                    assert o.twv_gap is not None
-                    assert o.twv_gap >= NECESSARY_POINTS, (cal, v, k, e)
+                verify(cal, day, store, step, k, e, o, checks)
             # the same decisions on a store physically truncated at each decision instant
             for cutoff in sorted({o.spend or cal.e - LAST_DECISION for o in outs.values()}):
                 small = store.truncated(cal.a, cutoff)
@@ -807,13 +1385,14 @@ def main() -> int:
 
     ctx = Context(
         cfg=cfg,
+        commit=commit,
+        synthetic=synthetic,
         selected=selected,
         paths=paths,
         hashes=hashes,
         rows_total=rows_total,
         excluded=excluded,
         null_ticks=null_ticks,
-        cut=cut,
         trading=trading,
         weekdays=weekdays,
         missing_sessions=missing_sessions,
@@ -835,13 +1414,14 @@ def main() -> int:
 @dataclass
 class Context:
     cfg: object
+    commit: str
+    synthetic: int
     selected: dict[Timeframe, list[date]]
     paths: dict[Timeframe, list[Path]]
     hashes: dict[Path, str]
     rows_total: dict[Timeframe, int]
     excluded: dict[Timeframe, int]
     null_ticks: int
-    cut: datetime
     trading: list[date]
     weekdays: int
     missing_sessions: list[tuple[date, str]]
@@ -904,15 +1484,7 @@ def count_rows(ctx: Context) -> list[list[object]]:
     for tf, ds in ctx.selected.items():
         add("", "", "", "inputs", tf.value, "files", len(ds))
         add("", "", "", "inputs", tf.value, "rows_in_files", ctx.rows_total[tf])
-        add(
-            "",
-            "",
-            "",
-            "inputs",
-            tf.value,
-            "rows_excluded_trading_date_after_last",
-            ctx.excluded[tf],
-        )
+        add("", "", "", "inputs", tf.value, "rows_excluded_open_time_ge_cut", ctx.excluded[tf])
     add("", "", "", "inputs", "M5", "null_tick_count", ctx.null_ticks)
     add("", "", "", "dates", "all", "weekdays", ctx.weekdays)
     add("", "", "", "dates", "all", "market_trading_dates", len(ctx.trading))
@@ -952,25 +1524,31 @@ def count_rows(ctx: Context) -> list[list[object]]:
             for sl in slices:
                 add(v, k, e, "point", sl, "session_dates", 1)
                 add(v, k, e, "point", sl, f"status_{o.status}", 1)
+                # section 6.5 counters, by their spec names
                 for side, n in o.setups.items():
                     add(v, k, e, "point", sl, f"setups_{side}", n)
                 for fate, n in o.fates.items():
-                    add(v, k, e, "point", sl, f"fate_{fate}", n)
-                for name in (
-                    "ambiguous",
-                    "regime_off",
-                    "data_gap",
-                    "twv_undefined",
-                    "zero_weight",
-                    "blackout_skipped",
-                    "replaced_at_expiry",
-                    "replaced_after_break",
-                    "replaced_after_break_same_instant",
-                ):
+                    add(v, k, e, "point", sl, f"setups_{fate}", n)
+                for metric, name in COUNTERS:
+                    add(v, k, e, "point", sl, metric, getattr(o, name))
+                if o.status in SPENT[1:]:  # ruling R1: only the first failure's counter
+                    add(v, k, e, "point", sl, o.status, 1)
+                for name in NONNORMATIVE:
                     add(v, k, e, "point", sl, name, getattr(o, name))
                 if o.spend:
                     add(v, k, e, "point", sl, "spends", 1)
-                    add(v, k, e, "point", sl, f"geometry_{geometry_cell(o)}", 1)
+                    # ruling R1 combination flags (not section 6.5 counters)
+                    for flag in ("min", "cap", "rr"):
+                        add(
+                            v,
+                            k,
+                            e,
+                            "point",
+                            sl,
+                            f"would_fail_{flag}",
+                            getattr(o, f"would_fail_{flag}"),
+                        )
+                    add(v, k, e, "point", sl, would_fail_combination(o), 1)
                     gap = "ge" if o.twv_gap >= NECESSARY_POINTS else "lt"  # type: ignore[operator]
                     add(v, k, e, "point", sl, f"spend_twv_gap_{gap}_975", 1)
                 for name, n in o.near.items():
@@ -991,9 +1569,12 @@ def count_rows(ctx: Context) -> list[list[object]]:
     return [[*key, n] for key, n in acc.items()]
 
 
-def geometry_cell(o: Outcome) -> str:
-    bound = "below_min" if o.below_min else "above_cap" if o.above_cap else "in_bounds"
-    return f"{bound}_rr_{'fail' if o.rr_fail else 'ok'}"
+def would_fail_combination(o: Outcome) -> str:
+    """Ruling R1: the spend's three geometry checks as one flag combination."""
+    return (
+        f"would_fail_combination_min{int(o.would_fail_min)}"
+        f"_cap{int(o.would_fail_cap)}_rr{int(o.would_fail_rr)}"
+    )
 
 
 def kdev_pair(ctx: Context, v: str, e: float, k1: float, k2: float) -> Counter[str]:
@@ -1066,10 +1647,11 @@ def render(ctx: Context) -> str:
     cfg = ctx.cfg
     tfs = list(ctx.selected)
     out = [
-        "# vwap_reversion 0.1.0 draft revision 3: B1 feasibility counts (2026-10-11)",
+        "# vwap_reversion 0.1.0 draft revision 4: B1 feasibility counts (2026-10-11)",
         "",
         "Generated read-only by `scripts/vwap_reversion_feasibility.py` under the owner's B1",
-        f"authorisation for the draft at `{SPEC_COMMIT}` (spec blob `{SPEC_BLOB}`, checked at start).",
+        "authorisation and rulings R1–R6 (spec section 18c), from the clean methodology commit",
+        f"`{ctx.commit}` (spec blob `{SPEC_BLOB}`, both checked before any market data was read).",
         f"Machine-readable counts: `{STEM}.csv` (long format: variant, k_dev, er_max, scope, slice,",
         "metric, count).",
         "",
@@ -1078,9 +1660,9 @@ def render(ctx: Context) -> str:
         "  file; no strategy implementation; no rule or parameter changed.",
         "- **Data-informed from here on.** Any later choice about this family is made knowing",
         "  these counts and must be listed as data-informed (spec section 18b, B1).",
-        "- `signal` here means *geometry-eligible*: the spend passed sections 8, 8a and 9 on bid",
-        "  bars. It is an upper bound on trades: the risk engine, the broker and the quotes",
-        "  (section 13.2) are not applied.",
+        "- **Geometry-eligible signals, never trades.** `signal` means the spend passed sections 8,",
+        "  8a and 9 on bid bars. The risk engine, the broker and the quotes (section 13.2) are not",
+        "  applied, so each count is an upper bound on what a backtest could take.",
         "",
         "## 1. Inputs and reproducibility",
         "",
@@ -1089,9 +1671,10 @@ def render(ctx: Context) -> str:
         "  (`TradingCalendar` windows `london_morning`, `ldn_ny_overlap`); session windows missing on a",
         f"  trading date: {len(ctx.missing_sessions)}.",
         f"- Sealed period (`configs/backtest.yaml`) starts {cfg.backtest.sealed_period.first}. Files were selected by",  # type: ignore[attr-defined]
-        f"  name (UTC date ≤ {LAST}) before any was opened.",
-        "- Warm-up by bar count (spec section 3.3, counted as `backtest.loading.plan_market` does, from",
-        f"  Parquet row counts of whole UTC days before {FIRST}): H1 13, M15 100; M5 none.",
+        f"  name (UTC date ≤ {LAST}) before any was opened; no partition dated later was opened.",
+        "- Warm-up exactly by bar count (spec section 3.3): H1 13, M15 100, M5 none; the fewest whole",
+        f"  UTC days before {FIRST} holding that many bars (Parquet row counts), no calendar-day buffer.",
+        "  ATR(Ts) uses exactly the 100 newest M15 bars and ER(Ts) exactly the 13 newest H1 closes.",
     ]
     for tf in tfs:
         ps = ctx.paths[tf]
@@ -1101,23 +1684,26 @@ def render(ctx: Context) -> str:
             f" digest of (name, sha256) `{digest}`."
         )
     out += [
-        f"- Bars from {ctx.cut:%Y-%m-%d %H:%MZ} on (trading date {LAST + timedelta(days=1)}, held in the file",
-        "  dated "
-        f"{LAST}) were excluded in the scan and never used: "
+        f"- Ruling R6: every file was scanned with the predicate `open_time < {CUT:%Y-%m-%dT%H:%M:%SZ}`",
+        f"  (the market open of trading date {LAST + timedelta(days=1)}, checked against `configs/data.yaml`).",
+        "  Rows excluded, counted only (their values were not collected): "
         + ", ".join(f"{tf.value} {ctx.excluded[tf]}" for tf in tfs)
-        + " rows.",
+        + ". No returned frame holds a row at or after the cut (asserted).",
         f"- Null `tick_count` in M5 bars read: {ctx.null_ticks}. Input files re-hashed after the run: unchanged.",
-        f"- Constants: point {POINT} and `trade_stops_level` {STOPS_LEVEL_POINTS} as recorded in",
-        "  `docs/strategies/opening_range_breakout.md` section 8a (pinned snapshot, not re-opened; B2",
-        f"  re-reads them); minimum `max(500, {STOPS_LEVEL_POINTS} + 10)` = {MIN_POINTS} points, the same for any stops",
-        f"  level ≤ 490; cap {CAP_POINTS}; buffer {BUFFER_POINTS}; ATR({ATR_PERIOD}) over {ATR_BARS} M15 bars; ER over {ER_BARS + 1} H1",
-        "  closes; expiry 30 min; decision instants `A + 60 < T ≤ E − 15`.",
-        "- Command: `uv run --no-sync python scripts/vwap_reversion_feasibility.py`. On the VM `uv run`",
-        "  cannot start from the agent's process (os error 448), so it ran as the venv's interpreter",
-        "  build with `-S` and only the venv's site-packages (the `venv_exec.py` wrapper recorded in",
-        "  `opening_range_breakout_2026-10-11_dev_launch.md`). The byte-for-byte rerun check and both",
-        "  files' sha256 are recorded in `docs/STATUS.md` (queue A4), not here, because this file",
-        "  cannot know them when it is written.",
+        f"- Provisional recorded inputs (not a snapshot verification; B2 verifies both): point {POINT}",
+        f"  and `trade_stops_level` {STOPS_LEVEL_POINTS}, copied from the frozen `docs/strategies/opening_range_breakout.md`",
+        f"  (sections 8a and 8); minimum `max(500, {STOPS_LEVEL_POINTS} + 10)` = {MIN_POINTS} points, the same for any",
+        f"  stops level ≤ 490; cap {CAP_POINTS}; buffer {BUFFER_POINTS}; ATR({ATR_PERIOD}) over {ATR_BARS} M15 bars; ER over",
+        f"  {ER_BARS + 1} H1 closes, path summed with `math.fsum`; expiry 30 min; decision instants `A + 60 < T ≤ E − 15`.",
+        f"- Official classifications use exact float64 comparisons; comparisons within {NEAR:g} of their",
+        "  threshold are reported separately (section 6) and never change a classification.",
+        f"- Synthetic tests run before any market data was read: {ctx.synthetic} cases passed.",
+        f"- Interpreter: Python {platform.python_version()}, `{Path(sys.executable).name}`, site disabled (`-S`):"
+        f" {bool(sys.flags.no_site)}.",
+        "- Command: `uv run --no-sync python scripts/vwap_reversion_feasibility.py`. The launch",
+        "  actually used, the byte-for-byte rerun check and both output files' sha256 are recorded in",
+        f"  `{STEM.replace('_feasibility', '_run')}.md` and `docs/STATUS.md` (queue A4), not here, because",
+        "  this file cannot know them when it is written.",
         "",
     ]
     out += render_calendar(ctx)
@@ -1262,8 +1848,9 @@ def render_setup_bars(ctx: Context) -> list[str]:
     out = [
         "## 4. Setup-window bars (shared by both variants, ignoring the spend)",
         "",
-        "Every M15 bar with `A + 60 ≤ Ts ≤ E − 45`, classified per point by section 5 (convention",
-        "C5 of section 12). `ineligible` = rule 5 (read set, TWV, ATR) or rule 6 (blackout) fails;",
+        "Every M15 bar with `A + 60 ≤ Ts ≤ E − 45`, classified per point by section 5 and ruling R5",
+        "(mutually exclusive; ambiguous regardless of the regime; regime off includes ER",
+        "unavailable). `ineligible` = rule 5 (read set, TWV, ATR) or rule 6 (blackout) fails;",
         "`no side` = neither side's rules 3–4. Setups with `TWV(Ts) − X` (short: `Y − TWV(Ts)`)",
         "below 9.75 USD cannot meet section 13.1 unless the mean moves away from the extreme by T.",
         "",
@@ -1318,24 +1905,19 @@ def render_points(ctx: Context) -> list[str]:
     out = [
         "## 5. Setup life cycle per point (spec 6.5 counters, while the session-date is unspent)",
         "",
-        "Each counted setup ends in one fate (conventions C2–C4): triggered (= spent), broken,",
-        "replaced or expired. `after break` = a newer setup arrived while the old one was already",
-        "broken (`same T`: broken at that instant); `at expiry` = a newer setup at exactly",
-        "`Ts + 30` (the old one counts expired). These two columns give the counts under the other",
-        "readings of section 6.5.",
+        "Each counted setup has one terminal outcome (rulings R2–R4): triggered (= spent), broken",
+        "(`setups_broken`), replaced (`setups_replaced`: an unbroken active setup displaced by a",
+        "newer setup) or expired (`setups_expired`). At one instant breaking precedes replacement,",
+        "and at `Ts + 30` the old setup's last trigger and break are evaluated first. The three",
+        "*non-normative* columns are not section 6.5 counters: a newer setup arriving while the old",
+        "one was already broken (`same T`: broken at that instant) or at exactly `Ts + 30` (the old",
+        "one counts expired); adding them to `setups_replaced` gives the alternative “both” counts.",
         "",
     ]
     rows = []
     names = (
-        "replaced_after_break",
-        "replaced_after_break_same_instant",
-        "replaced_at_expiry",
-        "ambiguous",
-        "regime_off",
-        "data_gap",
-        "twv_undefined",
-        "zero_weight",
-        "blackout_skipped",
+        *NONNORMATIVE,
+        *(name for _, name in COUNTERS),
     )
     for (v, k, e), outs in ctx.results.items():
         setups, fates = Counter(), Counter()
@@ -1358,23 +1940,21 @@ def render_points(ctx: Context) -> list[str]:
                 "k_dev, er_max",
                 "setups long / short",
                 *FATES,
-                "after break",
+                "non-normative: after break",
                 "same T",
                 "at expiry",
-                "ambiguous",
-                "regime off",
-                "`data_gap`",
-                "`twv_undefined`",
-                "zero weight",
-                "`blackout_skipped`",
+                *(f"`{metric}`" for metric, _ in COUNTERS),
             ],
             rows,
         ),
         "",
         "## 6. Spend, geometry and session-date statuses",
         "",
-        "Statuses with the registered precedence (section 6.5). Within a spend the checks run in",
-        "the order minimum, cap, reward:risk (convention C1); the cross-tab shows every overlap.",
+        "Statuses with the registered precedence (section 6.5). Ruling R1: at a spend the checks",
+        "are evaluated in the order minimum, cap, reward:risk; the first failure is the sole status",
+        "and increments only its official counter (`stop_below_minimum`, `stop_above_cap`,",
+        "`reward_risk_below_min` = the status columns). The second table shows the `would_fail_*`",
+        "combination flags (not section 6.5 counters), so other aggregations stay possible.",
         "",
     ]
     rows = []
@@ -1384,7 +1964,11 @@ def render_points(ctx: Context) -> list[str]:
     out += [table(["variant", "k_dev, er_max", "session-dates", *STATUSES], rows), ""]
     rows = []
     for (v, k, e), outs in ctx.results.items():
-        g = Counter(geometry_cell(o) for o in outs if o.spend)
+        g = Counter(
+            would_fail_combination(o).removeprefix("would_fail_combination_")
+            for o in outs
+            if o.spend
+        )
         spends = sum(g.values())
         nec = sum(1 for o in outs if o.spend and o.twv_gap >= NECESSARY_POINTS)  # type: ignore[operator]
         rows.append(
@@ -1392,12 +1976,12 @@ def render_points(ctx: Context) -> list[str]:
                 v,
                 pt(k, e),
                 spends,
-                f"{g['below_min_rr_ok']} / {g['below_min_rr_fail']}",
-                f"{g['above_cap_rr_ok']} / {g['above_cap_rr_fail']}",
-                g["in_bounds_rr_fail"],
-                g["in_bounds_rr_ok"],
+                f"{g['min1_cap0_rr0']} / {g['min1_cap0_rr1']}",
+                f"{g['min0_cap1_rr0']} / {g['min0_cap1_rr1']}",
+                g["min0_cap0_rr1"],
+                g["min0_cap0_rr0"],
                 f"{nec} ({share(nec, spends)})",
-                share(g["in_bounds_rr_ok"], spends),
+                share(g["min0_cap0_rr0"], spends),
             ]
         )
     out += [
@@ -1406,8 +1990,8 @@ def render_points(ctx: Context) -> list[str]:
                 "variant",
                 "k_dev, er_max",
                 "spends",
-                "d_S < 500: rr ok / rr fail",
-                "d_S > 2,000: rr ok / rr fail",
+                "d_S < 500: rr ok / rr would fail",
+                "d_S > 2,000: rr ok / rr would fail",
                 "in bounds, rr fail",
                 "signals",
                 "spends with TWV(T) gap ≥ 9.75",
@@ -1416,8 +2000,8 @@ def render_points(ctx: Context) -> list[str]:
             rows,
         ),
         "",
-        "Funnel per session-date (C1 order): session-dates → at least one setup counted → spent →",
-        "passes the minimum → passes the cap → passes reward:risk (= signal).",
+        "Funnel per session-date (R1 order): session-dates → at least one setup counted → spent →",
+        "passes the minimum → passes the cap → passes reward:risk (= geometry-eligible signal).",
         "",
     ]
     rows = []
@@ -1425,8 +2009,8 @@ def render_points(ctx: Context) -> list[str]:
         n = len(outs)
         with_setup = sum(1 for o in outs if o.counted)
         spent = sum(1 for o in outs if o.spend)
-        p_min = sum(1 for o in outs if o.spend and not o.below_min)
-        p_cap = sum(1 for o in outs if o.spend and not o.below_min and not o.above_cap)
+        p_min = sum(1 for o in outs if o.spend and not o.would_fail_min)
+        p_cap = sum(1 for o in outs if o.spend and not o.would_fail_min and not o.would_fail_cap)
         sig = sum(1 for o in outs if o.status == "signal")
         rows.append([v, pt(k, e), n, with_setup, spent, p_min, p_cap, sig, share(sig, n)])
     out += [
@@ -1451,7 +2035,7 @@ def render_points(ctx: Context) -> list[str]:
         for o in outs:
             near.update(o.near)
     out += [
-        f"Float comparisons within {NEAR:g} of their threshold (deviation, ER, room to the mean), summed over all points and variants: "
+        f"Float comparisons within {NEAR:g} of their threshold (deviation, new extreme, ER, break, rejection, room to the mean), summed over all points and variants; reported only, never used to change a classification: "
         + (", ".join(f"{k} {n}" for k, n in sorted(near.items())) or "none")
         + ".",
         "",
@@ -1661,7 +2245,7 @@ def render_checks(ctx: Context) -> list[str]:
         "",
         "- Statuses: exactly one per session-date; spent statuses = spends; per point, the fold,",
         "  session and year splits sum to the totals (checked below for every point and variant).",
-        "- Fates: per session-date, triggered + broken + replaced + expired = counted setups, and",
+        "- Terminal outcomes: per session-date, triggered + broken + replaced + expired = counted setups, and",
         "  triggered = spends.",
         "- No spend at a blackout instant; no spend at or after the first missing slot; every",
         "  signal has `TWV(T) − X ≥ 9.75 USD` (section 13.1, necessary).",

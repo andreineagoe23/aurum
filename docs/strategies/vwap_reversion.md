@@ -4,17 +4,20 @@
 >
 > - Written by Claude from `docs/STRATEGY_SPEC_TEMPLATE.md` at the owner's request
 >   (2026-10-11: "documentation-only draft of vwap_reversion 0.1.0"). Revision 2 answered the
->   owner's first B0 review; revision 3 applies the B0 audit's documentation corrections
->   (both 2026-10-11). The changes are listed in section 19.
-> - **No market data was read for this draft**: no bars, ticks, feature stores, trade tables,
->   ledger rows or symbol snapshots, and no feasibility count was run. Every number below is a
->   rule choice, arithmetic, or a figure quoted from a committed document or config (cited
->   where used).
+>   owner's first B0 review; revision 3 applies the B0 audit's documentation corrections;
+>   revision 4 records the owner's B1 authorisation and rulings R1–R6 (all 2026-10-11). The
+>   changes are listed in section 19.
+> - **No market data was read for this draft, up to and including revision 4**: no bars,
+>   ticks, feature stores, trade tables, ledger rows or symbol snapshots, and no feasibility
+>   count was run. Every number below is a rule choice, arithmetic, or a figure quoted from a
+>   committed document or config (cited where used).
 > - **B0 decided (owner, 2026-10-11):** decisions V1–V17 (section 0) accepted with the
 >   proposed defaults; V17 explicitly, with the disclosure as corrected in revision 3. The
->   draft is **not frozen**. No snapshot read, freeze, code, config change, feasibility
->   diagnostic, test, trace, trial, ledger, parity or sealed access is authorised (B1 onward,
->   section 18b).
+>   draft is **not frozen**.
+> - **B1 authorised (owner, 2026-10-11):** the feasibility diagnostic only, under rulings
+>   R1–R6 and the numerical rulings of section 18c. No snapshot read (B2), freeze, strategy
+>   implementation, registry or config change, backtest, fill, exit, P&L, ledger access, trial,
+>   parity access or sealed-data opening is authorised.
 > - **Written after two rejected families.** The author has read the trend_pullback 0.2.0 and
 >   opening_range_breakout 0.1.0 development results, including their splits. Section 18
 >   lists what was seen and which choices it could have influenced.
@@ -54,7 +57,7 @@ V16 and V17 are new in revision 2.
 - Variants: `m15` and `m5`. They share the mean, regime, setups, stop, target, timeout, spend
   rule and grid; they differ in the decision bars of the trigger (M15 or M5), which changes
   the confirmation level, the decision instants and the timing (section 6.4).
-- Version: `0.1.0` (draft, revision 3)
+- Version: `0.1.0` (draft, revision 4)
 - Author: Claude (draft) for Andrei Neagoe
 - Date: 2026-10-11
 
@@ -232,6 +235,8 @@ reaches the same state, including whether and when the session was spent (sectio
 - **Non-trending regime** at `Ts`: `ER(Ts) ≤ er_max`. `er_max` is searched: {0.30, 0.50},
   default 0.30. The regime is checked once, at the setup close; it is not re-checked at the
   trigger or during the position.
+- The denominator is summed with `math.fsum`, so the value is deterministic (clarified in
+  revision 4; the defined quantity is unchanged).
 - Fewer than 13 H1 bars, or a zero denominator → no regime → no setup.
 - ER does not depend on side.
 - **Why ER.** It is bounded in [0, 1], has no smoothing seed, and needs no price-unit
@@ -284,11 +289,15 @@ A **setup** is an M15 bar `b_s` of session `s` on date D, closing at `Ts`, that 
 All other rules (window, regime, read set, blackout, expiry, spend, minimum, cap, minimum
 reward:risk, timeout) are identical for both sides.
 
-- A bar meeting the long **and** the short side rules is **not** a setup
-  (`ambiguous_setup`); it does not replace an active setup (section 6.2), but it breaks any
-  active setup whose extreme it passes (trigger rule 3).
-- A bar meeting 1 and 3–6 for one side but not 2 counts one `setup_regime_off` (diagnostic of
-  how often the regime binds).
+- **Classification (ruling R5, revision 4), mutually exclusive.** It first requires rules 1,
+  5 and 6. Then:
+  - both sides satisfy side rules 3 and 4 → `ambiguous_setup`, **whatever the regime**; it
+    does not also count `setup_regime_off`;
+  - exactly one side satisfies rules 3 and 4, but rule 2 fails or ER is unavailable →
+    `setup_regime_off` (diagnostic of how often the regime binds);
+  - exactly one side satisfies rules 3 and 4 and rule 2 holds → a setup.
+- An ambiguous bar is **not** a setup; it does not replace an active setup (section 6.2), but
+  it breaks any active setup whose extreme it passes (trigger rule 3).
 - **Why the session extreme.** It is the only level fixed by bars the session has already
   printed, needs no lookback parameter, and is the point where the deviation is largest. A
   prior-day or prior-24-hour extreme is the alternative (V3).
@@ -368,6 +377,22 @@ overlap accumulation period or before the session; the FOMC window (13:30–15:0
   the session end never cuts an expiry window short.
 - **Cancellation** = broken, replaced, expired, or the session-date spent. Nothing else.
 
+**Order within an instant (rulings R2–R4, revision 4).** These fix how the life cycle is
+counted. No trading decision changes: they follow from the rules above.
+
+- **One terminal outcome (R2).** Each setup ends exactly once: triggered (it spent the
+  session-date), broken, replaced or expired. At each instant **breaking precedes
+  replacement**. A same-side newer setup is a strict new session extreme, so its bars pass the
+  old extreme: the old setup normally counts as **broken**, not replaced. `setups_replaced`
+  counts only an **unbroken** active setup displaced by a valid newer setup.
+- **Exact expiry (R3).** At `T = Ts_old + 30`, the old setup's final eligible trigger (rules
+  1–6) and its break condition are evaluated first. If it is still untriggered and unbroken,
+  it counts **expired**. A new setup closing at that instant does not replace it; it becomes
+  active for later instants if the session-date is still unspent.
+- **Setup closing at the spend (R4).** At T, the previously active setup and a possible spend
+  are processed first. If that spends the session-date, processing of the session-date stops
+  at T: a new setup whose bar also closes at T is neither classified nor counted.
+
 ### 6.3 Trigger and spend
 
 **Trigger** at a decision instant T (rule 1). All must hold, for the side of the active setup
@@ -436,18 +461,27 @@ strategy is called; only while the session-date is unspent unless stated):
 | Counter | +1 for each |
 |---|---|
 | `setups` | setup bar (section 5), by side, counted at its close, whether or not it is later triggered |
-| `setups_replaced` | active setup replaced by a newer one |
-| `setups_broken` | active setup broken before any trigger |
-| `setups_expired` | setup still active at `Ts + 30` that was neither triggered nor broken (a replaced setup is not counted) |
-| `ambiguous_setup` | bar meeting both the long and the short side rules |
-| `setup_regime_off` | bar meeting setup rules 1 and 3–6 but not 2 |
+| `setups_replaced` | unbroken active setup displaced by a valid newer setup (R2) |
+| `setups_broken` | active setup broken before any trigger, including by a same-side newer setup (R2) |
+| `setups_expired` | setup still active at `Ts + 30` that was neither triggered nor broken after that instant's trigger and break checks (R3; a replaced setup is not counted) |
+| `ambiguous_setup` | bar meeting rules 1, 5, 6 and both sides' rules 3 and 4, whatever the regime (R5) |
+| `setup_regime_off` | bar meeting rules 1, 5, 6 and exactly one side's rules 3 and 4, with rule 2 failing or ER unavailable (R5) |
 | `data_gap` | instant meeting trigger rule 1 whose read set is incomplete |
 | `twv_undefined` | instant meeting rule 1 with a complete read set but `Σ w_i = 0` |
 | `zero_weight_bar` | M5 bar with `tick_count` 0 in a read set (once per bar) |
 | `blackout_skipped` | close of the decision timeframe in the session, inside a blackout window, at which rules 2–6 would hold |
-| `stop_below_minimum` | spend whose `d_S` is below the minimum (section 8) — at the spend |
-| `stop_above_cap` | spend whose `d_S` exceeds 2,000 (section 8a) — at the spend |
-| `reward_risk_below_min` | spend with `d_T < d_S` (section 9) — at the spend |
+| `stop_below_minimum` | spend whose first geometry failure (R1) is `d_S` below the minimum (section 8) — at the spend |
+| `stop_above_cap` | spend whose first geometry failure (R1) is `d_S` above 2,000 (section 8a) — at the spend |
+| `reward_risk_below_min` | spend whose first geometry failure (R1) is `d_T < d_S` (section 9) — at the spend |
+
+**Geometry-failure precedence (ruling R1, revision 4).** At a spend the checks are evaluated
+in the order (1) `d_S` below the minimum, (2) `d_S` above the cap, (3) `d_T < d_S`. The first
+failure supplies the sole session-date status and increments only its counter. Reports keep
+separate, clearly named `would_fail_*` combination flags (each check's result regardless of
+precedence) so other aggregations remain possible; those flags are **not** section 6.5
+counters. Each terminal life-cycle outcome counts once (R2–R4, section 6.2); counts of a newer
+setup arriving after a break or at an exact expiry may be reported as non-normative
+diagnostics, never as counters.
 
 **Session-date status** (exactly one, the first that applies):
 
@@ -811,8 +845,10 @@ meet 13.1 and 13.2 together.
 
 ## 15. Expected trade count
 
-- **Not estimated.** No count was run (not authorised). Feasibility diagnostics are a
-  separate approval (section 18b, B1).
+- **Not estimated in this text.** No count had been run when revision 4 was written. The B1
+  feasibility diagnostic (section 18c), authorised 2026-10-11, produces descriptive counts of
+  geometry-eligible signals as separate evidence; they are not trades and are not written back
+  into this section without a recorded, data-informed revision.
 - **Upper bound:** one per session-date, so at most 2 × the number of trading dates.
 - **Requirements:** ≥ 30 closed trades per OOS fold, ≥ 200 concatenated, ≥ 30 per side and
   per session (gates 1, 8, 9), and ≥ 100 prior trades for a point to be selectable for a fold
@@ -1125,7 +1161,7 @@ Claude stops at each boundary; one approval never covers the next.
 | # | Step | Needs | Reads market data? |
 |---|---|---|---|
 | B0 | Review of this draft; decisions V1–V17 (**decided 2026-10-11**: all accepted, V17 explicitly) | owner | no |
-| B1 | Feasibility diagnostics (optional): descriptive counts on development bars ≤ 2025-09-30, no fill, exit or P&L; any rule change after them is listed as data-informed | separate approval | yes, development only |
+| B1 | Feasibility diagnostics (optional): descriptive counts on development bars ≤ 2025-09-30, no fill, exit or P&L; any rule change after them is listed as data-informed (**authorised 2026-10-11** with rulings R1–R6, section 18c) | separate approval | yes, development only |
 | B2 | Pinned-snapshot read, then freeze 0.1.0: the file's sha256 is checked against `backtest.yaml` `symbol_snapshot`; only the section 8a inputs and `trade_stops_level` are read; they are recorded in section 8a before the freeze | owner; the snapshot read needs the owner's explicit authorisation | pinned symbol snapshot only, no market data |
 | B3 | Implementation and deterministic tests (synthetic data only) | separate approval | no |
 | B4 | Real-data trace check (no P&L, no ledger) | separate approval | yes, development only |
@@ -1135,6 +1171,87 @@ Claude stops at each boundary; one approval never covers the next.
 | B8 | Decision on the assessment | owner | — |
 | B9 | Later validation, each separately: stress re-runs (gate 5), best-case replay (gate 11), frozen-configuration neighbourhood (gate 10), like-for-like null baseline, Phase 6 sealed opening | separate approval each | yes |
 
+## 18c. B1 feasibility diagnostic (authorised 2026-10-11)
+
+The owner authorised B1 on 2026-10-11 and ruled on the six ambiguities the diagnostic raised.
+This section records the access rules, the rulings and the intended run **before any market
+data is read**. Nothing in it changes a trading rule. R1–R5 are written into sections 5, 6.2
+and 6.5, where they also bind the implementation.
+
+**Rulings.**
+
+| # | Topic | Ruling | Where |
+|---|---|---|---|
+| R1 | Geometry-failure precedence | Minimum, then cap, then `d_T < d_S`; the first failure is the sole status and increments only its counter; `would_fail_*` combination flags kept apart, not counters | 6.5 |
+| R2 | Setup life cycle | One terminal outcome; breaking precedes replacement; a same-side newer setup normally breaks the old one; `setups_replaced` = an unbroken setup displaced; alternative "both" counts only as non-normative diagnostics | 6.2, 6.5 |
+| R3 | Exact expiry | At `Ts_old + 30` the old setup's final trigger and break are evaluated first; untriggered and unbroken → expired; a new setup at that instant does not replace it | 6.2, 6.5 |
+| R4 | Setup closing at the spend | The previous setup and the spend are processed first; a spend stops the session-date at T; a setup closing at T is neither classified nor counted | 6.2 |
+| R5 | Ambiguous and regime-off | After rules 1, 5, 6: both sides → ambiguous whatever the regime; one side with rule 2 failing or ER unavailable → regime-off; one side with the regime → setup; mutually exclusive | 5, 6.5 |
+| R6 | Final UTC partition | The 2025-09-30 partition is authorised. Load with a predicate excluding `open_time >= 2025-09-30T22:00:00Z` (the market open of trading date 2025-10-01); assert that no returned frame contains such a row; report only the number excluded per timeframe, never their values, and pass none of them into any calculation. No partition dated 2025-10-01 or later is opened | this section |
+
+**Numerical rulings.**
+
+- `point` = 0.01 and `trade_stops_level` = 0 are **provisional recorded B1 inputs**, copied
+  from the frozen opening_range_breakout spec (sections 8a and 8). They are not a snapshot
+  verification; B2 must still verify both from the pinned snapshot. With any stops level
+  ≤ 490 the minimum is 500.
+- The ER denominator is summed with `math.fsum` (section 4).
+- Official classifications use exact float64 comparisons. Comparisons within 1e-9 of their
+  threshold (deviation, new extreme, ER, break, rejection, room to the mean) are reported
+  separately; the tolerance never alters an official classification.
+- Warm-up exactly by bar count: 13 H1 and 100 M15 bars (section 3.3), the fewest whole UTC
+  days before 2020-12-15 that hold them; ATR uses exactly the 100 newest M15 bars and ER the 13
+  newest H1 closes. The generic ten-calendar-day buffer is not added.
+- The output is called **geometry-eligible signals, never trades**: a spend that passes
+  sections 8, 8a and 9 on bid bars, before the risk engine, the broker and the quotes. At least
+  100 prior geometry-eligible signals is necessary, not sufficient, for a point's eventual
+  selection (section 16).
+
+**Method and run.**
+
+- Script: `scripts/vwap_reversion_feasibility.py`, read-only. It refuses to start unless the
+  worktree is a clean commit (recorded as the methodology commit) and this file is revision 4
+  (git blob checked). It then runs its synthetic tests and checks the R6 cut against the
+  market calendar, all before any market data is read. It imports no ledger, backtest,
+  execution, risk, strategy, MT5 or snapshot module (asserted).
+- Inputs: canonical XAUUSD M5, M15 and H1 bid bars, files selected by UTC date in
+  2020-11 … 2025-09-30 (warm-up by bar count for M15 and H1; M5 from 2020-12-15), sha256 of
+  every file recorded before reading and re-checked after the run.
+- Intended command (repository root):
+  `uv run --no-sync python scripts/vwap_reversion_feasibility.py`. On the VM `uv run` cannot
+  start from the agent's process (os error 448), so the equivalent launch is the venv's base
+  interpreter with `-S` through the `venv_exec.py` wrapper (sha256 `7714dc0e…`, verbatim in
+  `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_launch.md`):
+  `& $py -S "$S\venv_exec.py" scripts\vwap_reversion_feasibility.py`. The script is then run a
+  second time and both outputs must be byte-identical.
+- Outputs: `docs/strategies/evidence/vwap_reversion_2026-10-11_b1_feasibility.md` (report)
+  and `…_b1_feasibility.csv`, UTF-8, LF. CSV columns `variant, k_dev, er_max, scope, slice,
+  metric, count`, one integer count per row:
+  - `variant` is `m15`, `m5`, `both` (shared setup bars), `m15-m5` (overlap) or empty (inputs,
+    dates, read set, checks); `k_dev` and `er_max` are the grid point, a `k_dev` pair such as
+    `1.0-1.5`, or empty.
+  - `scope` is one of `inputs`, `dates`, `read_set`, `calendar`, `setup_bars`, `point`,
+    `selection`, `k_dev`, `overlap`, `checks`; `slice` is `all`, a timeframe, a session, a
+    fold, a year, a side or a selection boundary.
+  - `point` metrics: `session_dates`, `status_<status>`, the section 6.5 counters by name
+    (`setups_long`, `setups_short`, `setups_triggered`, `setups_broken`, `setups_replaced`,
+    `setups_expired`, `ambiguous_setup`, `setup_regime_off`, `data_gap`, `twv_undefined`,
+    `zero_weight_bar`, `blackout_skipped`, `stop_below_minimum`, `stop_above_cap`,
+    `reward_risk_below_min`), `spends`, R1's `would_fail_min`, `would_fail_cap`,
+    `would_fail_rr` and `would_fail_combination_min<0|1>_cap<0|1>_rr<0|1>`, R2's
+    `nonnormative_new_setup_after_break`, `…_after_break_same_instant` and
+    `nonnormative_new_setup_at_expiry`, `spend_twv_gap_<ge|lt>_975`, `near_boundary_<name>`.
+  - `inputs` metrics include `rows_excluded_open_time_ge_cut` per timeframe (R6).
+- **Procedure.** Commit 1 (methodology: this revision, STATUS, script with synthetic tests)
+  is committed and pushed before any market data is read. B1 runs only from that exact clean
+  commit. If any script or rule change proves necessary after market data is opened, Claude
+  stops and reports it before editing or rerunning. Commit 2 adds the report, the CSV and a run
+  record (methodology commit, command, input identities and hashes, excluded-row counts,
+  output hashes, the second-run byte-identity check), and STATUS records the descriptive
+  result. Claude then stops.
+- **Consequence.** Every later choice about this family is made knowing the B1 counts and is
+  listed as data-informed (section 18b).
+
 ## 19. Change log
 
 | Version | Date | Change | Reason |
@@ -1142,3 +1259,4 @@ Claude stops at each boundary; one approval never covers the next.
 | 0.1.0 (draft) | 2026-10-11 | Initial draft: tick-weighted session mean (VWAP proxy), H1 efficiency-ratio regime, M15 setup at a new session extreme ≥ `k_dev` ATR from the mean, rejection trigger on M15 or M5 bars, stop 25 points beyond the extreme within 500–2,000 points, target at the mean with `d_T ≥ d_S`, 90-minute timeout, one use per session-date, 12-trial grid, gates carried forward from ORB 0.1.0, cumulative N = 66 + n, proposed Phase 5 stop rule. Decisions V1–V15 open. No data read | Owner authorised a documentation-only draft (2026-10-11) after rejecting opening_range_breakout 0.1.0 |
 | 0.1.0 (draft, rev. 2) | 2026-10-11 | Short rules written out (table 5a; V16). Setup window `Ts ≤ E − 45` (V13): same setups and latest decision `E − 15` in both variants. Exact decision-instant, blackout and deadline tables (6.1, 10.2); explicit hold bounds 12:15 / 17:45 London with a construction-time check (V9); the timeout claim corrected from "closes" to "requests a close". Causal rules made explicit: TWV bars per rule, target fixed at T, setup life cycle, spend after risk or broker rejection (6.2, 6.3). Variant differences stated (6.4). Geometry split into necessary / executable / cost (13); the 9.75 USD derivation written out; the double-counted short spread removed (costs 0.8–4.1%, not 0.8–5.4%); break-even rates recomputed. Long sizing distance includes the spread (8a floors 8,038–8,118). Intra-bar evidence and its limits (8.2); statistics from dates now sealed disclosed (V17). Short synthetic trace. No data read | Owner's B0 review (2026-10-11) |
 | 0.1.0 (draft, rev. 3) | 2026-10-11 | B0 corrections, documentation only. Decision instants defined as `A + 60 min < T ≤ E − 15 min`; other OPEN calls return and count nothing (fixes `twv_undefined` at `T = A`). Session-date statuses given an explicit precedence (6.5). V17 disclosure completed (V5, V6, the 13.3 cost illustration behind V8, section 2, the release-spike remarks). B2 made an explicitly authorised, hash-checked pinned-snapshot read of the 8a inputs and `trade_stops_level` only, recorded before freezing. Wording: closing-side stops-level quote (13.2); the exact ADR-0009 §9 gate-11 rule (8.2); `atr_period` source (3.2); M15 slot completeness at non-M15 instants; ORB §16 applies verbatim where section 16 is silent, five details restated; MASTER_PROMPT paraphrase labelled; `setups_expired` excludes replaced setups; clipped session ends; complete FOMC-mismatch and early-cutoff lists, 45-minute cutoff never binding; mirror-property test constraint (18a). B0 decision recorded (V1–V17 accepted). **No trading rule changed; no market data, ledger or snapshot was read.** Audit and patch: `docs/strategies/evidence/vwap_reversion_2026-10-11_b0_audit.{md,patch}` | Owner accepted the B0 audit (2026-10-11) |
+| 0.1.0 (draft, rev. 4) | 2026-10-11 | B1 diagnostic and access clarifications, documentation only. Rulings R1–R6 recorded (new section 18c) and written into sections 5 (R5 classification), 6.2 (R2–R4 order within an instant) and 6.5 (R1 precedence and `would_fail_*` flags; counter definitions); ER denominator summed with `math.fsum` (section 4); numerical rulings (provisional `point` and `trade_stops_level`, exact comparisons with near-boundary reporting, warm-up exactly by bar count, "geometry-eligible signals, never trades"); intended command and output schema; section 15 wording; B1 marked authorised in 18b. **No market data had yet been read** (no bars, ticks, ledger rows or snapshot) **and no trading rule changed.** Not frozen | Owner's B1 authorisation and rulings (2026-10-11) |
