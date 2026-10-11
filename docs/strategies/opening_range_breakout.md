@@ -1,9 +1,10 @@
 # opening_range_breakout — strategy spec
 
-> **Status: DRAFT 0.1.0 (revision 2), for final spec review. Not frozen, not approved for
-> implementation.** The reviewer accepted decisions O1–O8 in principle on 2026-10-11 and asked
-> for this revision. There is no strategy code, no backtest, no P&L and no ledger row for this
-> family.
+> **Status: FROZEN 0.1.0 (2026-10-11).** The reviewer approved revision 2 for freezing,
+> implementation and deterministic tests only, with four documentation corrections (change
+> log). O1–O8 are frozen; no trading rule changed. Not approved: development backtests, P&L,
+> the 12 trials, sealed opening, real-data parity, new feasibility variants and production
+> ledger writes. Implementation: `aurum.strategies.opening_range_breakout`.
 >
 > - Written by Claude from `docs/STRATEGY_SPEC_TEMPLATE.md` at the reviewer's request ("draft
 >   the specification only").
@@ -11,22 +12,25 @@
 >   2020-12-15 … 2025-09-30), reproduced by `scripts/opening_range_breakout_feasibility.py`
 >   (read-only). The script writes
 >   `docs/strategies/evidence/opening_range_breakout_2026-10-11_feasibility.md` and its `.csv`.
->   Counts run up to the close that spends each range: **no price after that close was read**,
->   no fill, exit or P&L was computed, and no sealed-period file was opened.
+>   - The script loads whole development bar files (dated ≤ 2025-09-30, selected by name), so
+>     prices after a range's spending close were physically read into memory.
+>   - **No price after the spending close is used** for any fill, exit, return or P&L. The
+>     counts stop at that close, no fill, exit or P&L was computed, and no sealed-period file
+>     was opened.
 > - **Written after the trend_pullback 0.2.0 results were seen** (rejected 2026-10-11). This
 >   family is not a revision of trend_pullback. Section 18 lists every choice the counts
 >   informed and states what the author knew.
 > - On final approval the rules freeze; nothing changes after the first P&L-producing run. If
 >   every trial fails, the result is "opening_range_breakout 0.1.0 failed".
 
-## 0. Decisions (accepted in principle 2026-10-11, not frozen)
+## 0. Decisions (frozen 2026-10-11)
 
 | # | Decision | Accepted choice | Data-informed? |
 |---|---|---|---|
 | O1 | Range anchors | London range at **08:00 London**, New York range at **09:30 New York**, both research anchors (section 5) | No. Fixed before any count; counts exist only for these anchors |
 | O2 | Stop basis | **Opposite boundary of the range + a fixed 20 points** (section 8) | Yes: the range midpoint was compared and rejected as infeasible (evidence §3) |
 | O3 | News blackout | A close at a blackout instant **neither signals nor spends** the range (rule 12.3) | Yes: both treatments were counted (evidence §4) |
-| O4 | Stop bounds | Minimum **500 points**, cap **2,000 points** (ceiling 2,490) (section 8a) | No. Carried over from trend_pullback D2/D3; the counts were looked at but did not change them |
+| O4 | Stop bounds | Minimum **`max(500, trade_stops_level + 10)` points** (500 today), cap **2,000 points** (ceiling 2,490) (section 8a) | No. Carried over from trend_pullback D2/D3; the counts were looked at but did not change them |
 | O5 | Search grid | 2 variants × `or_bars` {2, 4} × `target_r` {1.0, 1.5, 2.0} = **12 trials** (section 14) | Partly: the exclusion of a 1-bar range cites the 2-bar widths (section 14) |
 | O6 | DSR trial count | **N = 66** cumulative (54 trend_pullback + 12 here), V over those 66 trials (section 16) | No |
 | O7 | Period, folds, gates, order | trend_pullback A1's evaluated period and folds, its gates adapted, evaluation stopping at the first mandatory failure (section 16) | No |
@@ -39,7 +43,7 @@
 - Variant: `m15` (enter on the M15 close outside the range) and `m5` (the same M15 range,
   entry on the M5 close outside it). These are two variants of one declared family search;
   only the decision timeframe differs (sections 6 and 7).
-- Version: `0.1.0` (draft, revision 2)
+- Version: `0.1.0` (frozen; text of revision 2 plus the four freeze corrections)
 - Author: Claude (draft) for Andrei Neagoe
 - Date: 2026-10-11
 
@@ -122,9 +126,10 @@ unchanged risk engine, not a strategy rule.
 - **Today this is met only incidentally.** With `warmup_bars = {}` the loader falls back to
   `backtest.warmup_days` (10 calendar days, 2020-12-05 … 12-14 for this period). That is
   several hundred M15 bars, but it is a calendar rule.
-- **Implementation requirement, when authorised:** the pipeline must declare the engine's
-  M15 need (100 bars) by bar count, apart from the strategy's `warmup_bars`, with a test.
-  Trend_pullback never exposed this, because its own 509-bar M15 warm-up covered it.
+- **Implementation requirement:** the pipeline declares the engine's M15 need (100 bars) by
+  bar count, apart from the strategy's `warmup_bars`, with a test. The run loads the maximum
+  of the two requirements per timeframe. Trend_pullback never exposed this, because its own
+  509-bar M15 warm-up covered it.
 - These 100 bars are never strategy inputs, and no decision, signal or metric is produced
   from them.
 
@@ -233,7 +238,7 @@ instant counted once however often the engine calls the strategy at it):
 |---|---|---|
 | `data_gap` | eligible decision time whose read set is incomplete. A missing range bar makes every eligible time of that window count. A missing bar after `range_end` makes every later eligible time count, because it stays in the read set; that range cannot be spent that date | the range is unspent |
 | `blackout_skipped` | instant meeting rules 6.1–6.3 but not 6.4 whose bar exists and closes outside `[L, H]`, with the range existing and no read-set bar missing so far. Several per window are possible (10:05 and 10:10 New York) | the range is unspent |
-| `stop_below_minimum` | range-date whose spending close gives `d < 500` (section 8) | at the spend |
+| `stop_below_minimum` | range-date whose spending close gives `d < max(500, trade_stops_level + 10)` (section 8; 500 while `trade_stops_level` ≤ 490) | at the spend |
 | `stop_above_cap` | range-date whose spending close gives `d > 2,000` (section 8a) | at the spend |
 
 - Instants that fail rule 6.3 are not counted anywhere.
@@ -319,7 +324,8 @@ so the ceiling is the same.
 **Feasibility counts** (evidence §1). The population is the 1,237 trading dates of the
 evaluated period, one range-date per range. There were no `data_gap`, `range_missing` or
 `no_decision_time` range-dates. "Spent" = the first eligible close outside the range within
-the window. The risk engine has not been applied.
+the window. The risk engine has not been applied. The pinned snapshot has `trade_stops_level`
+0, so the minimum in these counts is 500.
 
 | Range, `or_bars`, variant | `W` p10 / p50 / p90 (points) | Spent | `d` p10 / p50 / p90 / p99 (points) | `d` < 500 | `d` > 2,000 | Signals (within bounds) |
 |---|---|---|---|---|---|---|
@@ -368,14 +374,18 @@ the window. The risk engine has not been applied.
 
 - `max_hold = 120 minutes`, from `Signal.time` (the engine's existing rule, trend_pullback
   D6 b). The deadline is `Signal.time + 120 min`, rebuilt from the persisted signal after a
-  restart, and never restarted. At expiry the engine closes at market (TIMEOUT), filled on the
-  next quote after latency.
+  restart, and never restarted. At expiry the engine **requests** a market close (TIMEOUT); in
+  the simulator it fills on the next quote after latency.
+- **A deadline requests closure; it does not guarantee a fill.** A close can fail or be
+  delayed (no quote, disconnect, broker rejection, a lost reply). The engine retries at its
+  next step; the broker-side stop stays attached meanwhile.
 - **Why 120.** It equals the entry window: the hours after an anchor in which the hypothesis
   says accumulated orders are worked.
 - **Latest deadlines** (section 6 table):
   - `london`: **12:55 London** (m5 signal at 10:55). That is before `ldn_ny_overlap` starts
     (13:00 London) and before the earliest `newyork` range (13:30 London, mismatch weeks), so
-    a `london` position never meets a `newyork` signal.
+    the `london` close is requested before any `newyork` signal. If that close has not filled
+    by a `newyork` signal, the risk engine rejects the signal (exposure, rule 12.5).
   - `newyork`: **18:25 London** (m5 signal at 16:25 London). That is 13:25 New York in normal
     weeks and 14:25 New York in mismatch weeks. It is before force-flat at 20:00 London.
   - On an early close, force-flat at `market close − 15 min` comes first if it is earlier.
@@ -411,10 +421,13 @@ the window. The risk engine has not been applied.
    closed at a session end.
 5. **Signal priority:**
    - Each variant runs as its own strategy, in its own backtest run and account.
-   - Within a variant there is at most one signal per range per date, so at most two per date,
-     and the `london` position is always gone before the `newyork` window opens (section 10).
-   - `max_trades_per_day: 3` never binds. A signal while a position or pending order exists is
-     rejected by the risk engine (exposure), with no queueing and no reversal.
+   - Within a variant there is at most one signal per range per date, so at most two per date.
+     The `london` timeout deadline falls before the `newyork` window opens (section 10). The
+     deadline requests a close; it does not guarantee that the close has filled.
+   - `max_trades_per_day: 3` never binds. A signal while an earlier position or pending order
+     still exists, for any reason, is rejected by the risk engine (exposure), with no
+     queueing and no reversal. This rejection is kept; the strategy does not assume the
+     earlier position is gone.
 
 ## 13. Cost assumptions
 
@@ -452,7 +465,7 @@ Fixed (not searched; a change is a version bump):
 | `stop_basis` | opposite boundary of the range | Section 8 (O2) |
 | `stop_buffer_points` | 20 (fixed; not linked to `risk.yaml`) | Section 8 |
 | `max_hold_minutes` | 120 | Section 10 |
-| `min_stop_points` | 500 | Section 8 (O4) |
+| `min_stop_points` | 500; the effective minimum is `max(500, trade_stops_level + 10)` | Section 8 (O4) |
 | `stop_cap_points` | 2,000 | Section 8a (O4) |
 | signals per range per date | 1 (first eligible close outside) | Section 6 |
 
@@ -522,8 +535,15 @@ Fixed (not searched; a change is a version bump):
   not > 0 (gate 10).
 - **DSR inputs.** A trial whose daily-return series over the folds 1–4 market days has zero
   sample variance (for example, no exit in folds 1–4) has no defined Sharpe ratio.
-  - It is left out of V and listed by name, but it still counts in N.
-  - A candidate in that state has no OOS trades and has already failed gate 1.
+  - **Undefined trial SRs** stay counted in N (66), are listed by name, and are excluded from
+    V.
+  - **Undefined candidate SR:** if the candidate's concatenated OOS daily-return series has
+    no defined Sharpe ratio (zero sample variance, or fewer than 2 days), the DSR is undefined
+    and gate 12 **fails**.
+  - **Undefined V:** if fewer than 2 of the N trials have a defined SR, V (ddof 1) is
+    undefined, so the DSR is undefined and gate 12 **fails**.
+  - An undefined DSR never passes, whatever the other gates say. No substitute value (0,
+    the previous V, or fewer trials in N) is used.
 
 **Reported** for each variant:
 
@@ -576,8 +596,9 @@ Win rate is reported but is **not** a criterion.
     definition as trend_pullback gate 12 (Bailey & López de Prado, 2014), with (O6):
     - **N = 66**: every Phase 5 research trial so far (54 trend_pullback, 12 here);
     - **V** = the sample variance (ddof 1) of those trials' daily Sharpe ratios, each computed
-      the same way over the folds 1–4 market days, with the zero-variance rule above. The
+      the same way over the folds 1–4 market days, with the undefined-SR rules above. The
       trend_pullback values come from its existing runs, read-only.
+    - An undefined candidate SR or an undefined V fails this gate (DSR inputs above).
 13. **Sealed period untouched** (candidate-specific, as in the corrected trend_pullback report):
     - no opening_range_breakout trial's data range touches 2025-10-01 or later;
     - no sealed opening and no parity access by an opening_range_breakout run;
@@ -609,7 +630,7 @@ If both pass, both go to Phase 6.
 T = **2024-03-01T08:45:00Z**, variant m15, `london` range, defaults (`or_bars` 2, `target_r`
 1.5). On that Friday the UK is on GMT (summer time from 2024-03-31), so 08:00 London = 08:00Z.
 08:45 London is in `london_morning`, and 03:45 New York is outside every blackout window. All
-values are reproduced in evidence §6, which reads nothing after each spending close.
+values are reproduced in evidence §6, which uses no price after each spending close.
 
 | Condition | Values | Result |
 |---|---|---|
@@ -658,8 +679,9 @@ values are reproduced in evidence §6, which reads nothing after each spending c
     including splits by session, direction, year and variant: `london_morning` lost,
     `ldn_ny_overlap` gained, m5 beat m15. No rule here was chosen to follow or avoid those
     splits: both sessions and both variants are kept.
-  - **Data-informed choices.** All counts are reproduced in the evidence file, and nothing
-    after a spending close was read.
+  - **Data-informed choices.** All counts are reproduced in the evidence file. No price after
+    a spending close was used for any fill, exit, return or P&L (the script loads whole
+    development files, so such prices were read into memory).
     - **O2:** the opposite-boundary stop was chosen over the midpoint, which fails the 500-point
       minimum for 72–90% of `london` spending closes (evidence §3).
     - **O3:** the blackout treatment was chosen after counting both treatments (evidence §4).
@@ -688,9 +710,10 @@ values are reproduced in evidence §6, which reads nothing after each spending c
 - **News exposure of open positions.** The blackout blocks entries only; open positions keep
   their stops. The latest timeouts in section 6 are:
   - **Normal weeks: no daily release slot is reached.**
-    - A `london` position ends by 12:55 London = 07:55 New York, before 08:20.
-    - A `newyork` position opens at 10:15 New York or later (after the 10:00 slot) and ends
-      by 13:25 New York, before the 14:00 FOMC statement.
+    - A `london` position is due to close by 12:55 London = 07:55 New York, before 08:20
+      (a deadline requests the close; section 10).
+    - A `newyork` position opens at 10:15 New York or later (after the 10:00 slot) and is due
+      to close by 13:25 New York, before the 14:00 FOMC statement.
   - **Mismatch weeks (79 dates): both can be reached.**
     - 08:30 New York is then 12:30 London. A `london` signal after 10:30 London (only
       `or_bars` 4: m15 10:45, m5 10:35–10:55) has its deadline after 12:30 London.
@@ -707,7 +730,8 @@ values are reproduced in evidence §6, which reads nothing after each spending c
   points, not guaranteed. Phase 3b is decided per candidate from the backtests.
 - **Sample dependence.** At most two trades per date, one per session, sharing a macro
   backdrop.
-- **Implementation prerequisites** (not rules, to be built and tested only when authorised):
+- **Implementation prerequisites** (not rules; built and tested on 2026-10-11, see the change
+  log):
   - `warmup_bars = {}` accepted by the pipeline;
   - the risk engine's 100-bar M15 history declared by bar count (section 3);
   - the strategy reading the risk engine's `NewsBlackout` (allowed: `aurum.strategies` may
@@ -720,3 +744,4 @@ values are reproduced in evidence §6, which reads nothing after each spending c
 |---|---|---|---|
 | 0.1.0 (draft) | 2026-10-11 | Initial draft: two opening ranges (08:00 London, 09:30 New York), first close outside the range at M15 or M5, opposite-side stop + 20 points, 500/2,000-point bounds, 120-minute window and timeout, blackout instants not eligible, 12-trial grid, gates adapted from trend_pullback with the corrected gate 13 and an explicit evaluation order. Decisions O1–O8 open | Reviewer authorised the spec draft only (2026-10-11), after trend_pullback 0.2.0 was rejected |
 | 0.1.0 (draft, revision 2) | 2026-10-11 | O1–O8 recorded as accepted in principle. **No rule changed.** Corrects the m5 latest decision times (10:55 London; 11:25 or 12:25 New York) and the timeout and news-exposure examples, mismatch weeks included. Separates strategy warm-up (none) from the risk engine's 100-bar M15 ATR history. Commits the feasibility script and evidence, reconciles the two O3 populations and lists every data-informed choice. Describes the anchors as research anchors and states that a rejected family does not disprove its filters. Defines behaviour with missing training samples and the exact diagnostic counters. Writes out the short stop arithmetic and the fixed, unlinked 20-point buffer | Reviewer's revision request (2026-10-11) |
+| 0.1.0 (frozen) | 2026-10-11 | Frozen for implementation and deterministic tests only. **No trading rule changed.** Four documentation corrections: (1) the feasibility script loads whole development files, so the spec now says no price after a spending close is *used* for any fill, exit, return or P&L, not that none was read; (2) a timeout deadline requests a close and does not guarantee a fill, and a signal while an earlier position or order remains is still rejected (exposure); (3) `stop_below_minimum` is `d < max(500, trade_stops_level + 10)`, not `d < 500`; (4) an undefined candidate Sharpe ratio or an undefined V fails gate 12, and undefined trial SRs stay in N, are listed, and are left out of V. The engine's 100-bar M15 history is merged with the strategy warm-up by maximum per timeframe | Reviewer's freeze approval (2026-10-11) |

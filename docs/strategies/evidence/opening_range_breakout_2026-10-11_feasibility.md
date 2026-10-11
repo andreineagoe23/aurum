@@ -1,8 +1,9 @@
 # opening_range_breakout 0.1.0 draft: feasibility evidence (2026-10-11)
 
 Generated read-only by `scripts/opening_range_breakout_feasibility.py`. **No P&L**: no fill,
-exit or price after the close that spends a range is read or computed, and nothing is
-written to the ledger. Per-range-day rows: `opening_range_breakout_2026-10-11_feasibility.csv`.
+exit, return or P&L is computed, and nothing is written to the ledger. Whole development
+bar files are loaded, so prices after a spending close are in memory, but no such price
+is used for any count, fill, exit, return or P&L. Per-range-day rows: `opening_range_breakout_2026-10-11_feasibility.csv`.
 
 ## Inputs
 

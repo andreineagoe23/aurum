@@ -2,9 +2,10 @@
 
 Applies the draft spec's range, eligibility, breakout and stop rules (sections 5, 6, 8, 12) to
 development-period bars and counts what the rules would do up to the close that spends each
-range. Nothing after that close is read; no fill, exit or P&L is computed; nothing is written
-to the ledger. Bar files are selected by name before any is read: only trading dates up to
-2025-09-30 (the day before the sealed period) are opened.
+range. Whole bar files are loaded, but no price after that close is used for any count, fill,
+exit, return or P&L; no fill, exit or P&L is computed; nothing is written to the ledger. Bar
+files are selected by name before any is read: only trading dates up to 2025-09-30 (the day
+before the sealed period) are opened.
 
 It reproduces exactly what the draft's data-informed choices were based on, and nothing more:
 the opposite-side stop (O2) with the midpoint alternative it was compared with, and the two
@@ -316,8 +317,9 @@ def render(cfg, point, files, dates, keys, results, alt, evaluate, windows) -> s
         "# opening_range_breakout 0.1.0 draft: feasibility evidence (2026-10-11)",
         "",
         "Generated read-only by `scripts/opening_range_breakout_feasibility.py`. **No P&L**: no fill,",
-        "exit or price after the close that spends a range is read or computed, and nothing is",
-        f"written to the ledger. Per-range-day rows: `{STEM}.csv`.",
+        "exit, return or P&L is computed, and nothing is written to the ledger. Whole development",
+        "bar files are loaded, so prices after a spending close are in memory, but no such price",
+        f"is used for any count, fill, exit, return or P&L. Per-range-day rows: `{STEM}.csv`.",
         "",
         "## Inputs",
         "",
