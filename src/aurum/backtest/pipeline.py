@@ -38,14 +38,15 @@ from aurum.adapters.storage.parquet import sha256_file
 from aurum.adapters.storage.specs import SpecSnapshot, pinned_spec
 from aurum.backtest.accounting import equity_frame, journal_frame, summarize, trades_frame
 from aurum.backtest.broker import SimBroker, SimCosts
-from aurum.backtest.loading import MarketPlan, plan_market, read_market
+from aurum.backtest.loading import MarketPlan, merge_history, plan_market, read_market
 from aurum.backtest.runner import run_backtest
 from aurum.backtest.sealed import SealedAccess, resolve_access
 from aurum.backtest.storage import new_run_id, publish_run, stage_run
 from aurum.core.clock import ManualClock
 from aurum.core.errors import ArtifactsPendingError, ConfigError, EvaluationFailedError
+from aurum.core.timeframes import Timeframe
 from aurum.data.market_hours import MarketHours
-from aurum.execution.engine import Engine
+from aurum.execution.engine import HISTORY_BARS, Engine
 from aurum.ledger.trial_ledger import TrialLedger, context_hash, current_code_version
 from aurum.ports.clock import ClockPort
 from aurum.risk.base import RiskEngine
@@ -117,6 +118,11 @@ class Prepared:
     purpose: str
     context: dict[str, Any]
     """The frozen evaluation context (everything but the strategy params)."""
+    news: NewsBlackout
+    """The one news blackout the strategy and the risk engine share (risk.yaml)."""
+    history_bars: dict[Timeframe, int]
+    """Completed bars loaded before the first decision: the strategy warm-up and the engine's
+    own history, merged by maximum per timeframe."""
 
 
 @dataclass
@@ -193,12 +199,15 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
     strategy_cfg = cfg.strategies[request.strategy]
     if request.params is not None:
         strategy_cfg = strategy_cfg.model_copy(update={"params": dict(request.params)})
+    news = NewsBlackout(cfg.risk.news_blackout)
     strategy = build_strategy(
         strategy_cfg,
         variant=request.variant,
         symbol=symbol,
         point=spec.point,
         entries_allowed=lambda t: calendar.state_at(t).entries_allowed,
+        session_at=lambda t: s.session if (s := calendar.state_at(t)).entries_allowed else None,
+        blackout=news.reason_at,
         stops_level_points=spec.stops_level_points,
     )
     grid: list[dict[str, Any]] | None = None
@@ -219,6 +228,10 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
         code_version=code_version,
         clock=clock,
     )
+    # The engine reads the M15 ATR only for the policy risk engine's spread gate; the fixed
+    # stand-in (tester parity) reads none, so parity loads exactly its window as before.
+    engine_bars = dict(HISTORY_BARS) if request.risk == "policy" else {}
+    history = merge_history(strategy.warmup_bars, engine_bars)
     plan = plan_market(
         DataLayout(settings.data_dir),
         symbol,
@@ -227,7 +240,7 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
         warmup_days=bt.warmup_days if access.warmup_days is None else access.warmup_days,
         last_data_day=access.last_data_day,
         forbidden=access.forbidden,
-        warmup_bars=strategy.warmup_bars,
+        warmup_bars=history,
         warmup_before=start.date(),
     )
     data_hash = plan.data_hash(settings.data_dir)
@@ -270,6 +283,8 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
             "files": len(plan.files),
             "first_data_day": plan.first_data_day.isoformat(),
             "warmup_bars": {str(tf): n for tf, n in strategy.warmup_bars.items()},
+            "engine_history_bars": {str(tf): n for tf, n in engine_bars.items()},
+            "history_bars": {str(tf): n for tf, n in history.items()},
         },
         "grid": None if grid is None else _sha256_json(grid),
     }
@@ -287,6 +302,8 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
         config_hash=cfg_hash,
         purpose=purpose,
         context=context,
+        news=news,
+        history_bars=history,
     )
 
 
@@ -346,7 +363,7 @@ def _evaluate(
             cfg.risk,
             commission_per_lot_side=commission,
             stop_slippage_points=prep.slippage_points,
-            news=NewsBlackout(cfg.risk.news_blackout),
+            news=prep.news,
         )
         if request.risk == "policy"
         else FixedVolumeRisk(bt.fixed_volume_lots, commission)
@@ -425,6 +442,7 @@ def _evaluate(
         "notes": request.notes,
         "sealed_opened": prep.access.opened,
         "warmup_bars": {str(tf): n for tf, n in strategy.warmup_bars.items()},
+        "history_bars": {str(tf): n for tf, n in prep.history_bars.items()},
         "first_data_day": loaded.first_data_day.isoformat(),
         "attempt_id": attempt_id,
         "context_hash": ctx_hash,

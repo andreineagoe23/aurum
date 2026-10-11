@@ -17,27 +17,30 @@ from typer.testing import CliRunner
 
 from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
 from aurum.backtest import pipeline
-from aurum.backtest.loading import load_market
+from aurum.backtest.loading import load_market, merge_history
 from aurum.backtest.runner import BacktestResult, EquityPoint
 from aurum.backtest.storage import new_run_id, read_manifest, read_trades
 from aurum.cli import app
 from aurum.core.clock import SystemClock
 from aurum.core.errors import ConfigError, LedgerError, SealedPeriodError
 from aurum.core.timeframes import Timeframe
+from aurum.execution.engine import HISTORY_BARS
 from aurum.ledger.trial_ledger import TrialLedger
 from aurum.settings import load_settings
 from aurum.strategies import trend_pullback
+from aurum.strategies.opening_range_breakout import STATUSES
 from tests.sim_store import SNAPSHOT, snapshot_bytes, use_configs, write_store
 
 runner = CliRunner()
 TICK_DAY, BAR_DAY = date(2026, 9, 15), date(2026, 9, 14)  # Tuesday (exact ticks), Monday (bars)
+HISTORY_DAYS = [date(2026, 9, 9), date(2026, 9, 10)]  # 2 x 84 M15 bars: the engine's 100
 
 
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, repo_root: Path) -> tuple[Path, Path]:
     data, runs = tmp_path / "data", tmp_path / "runs"
     use_configs(tmp_path, repo_root, monkeypatch, {"first": "2030-01-07", "last": "2030-12-31"})
-    write_store(data, tick_days=[TICK_DAY], bar_days=[BAR_DAY])
+    write_store(data, tick_days=[TICK_DAY], bar_days=[*HISTORY_DAYS, BAR_DAY])
     monkeypatch.setenv("AURUM_DATA_DIR", str(data))
     monkeypatch.setenv("AURUM_RUNS_DIR", str(runs))
     return data, runs
@@ -233,6 +236,40 @@ def test_warmup_is_loaded_by_bar_count(tmp_path: Path) -> None:
             layout, "XAUUSD", **common, bar_spread_extra_points=2,
             warmup_bars={Timeframe.H1: 30}, warmup_before=date(2026, 9, 13), forbidden=[(thu, thu)],
         )  # fmt: skip
+
+
+def test_engine_history_is_merged_with_the_strategy_warmup(env: tuple[Path, Path]) -> None:
+    data, runs = env
+    tp = {Timeframe.H1: 504, Timeframe.M15: 509, Timeframe.M5: 3}
+    assert merge_history(tp, HISTORY_BARS) == tp  # by maximum per timeframe, never the sum
+    assert merge_history({}, HISTORY_BARS) == {Timeframe.M15: 100}
+    orb = [
+        "backtest",
+        "run",
+        "opening_range_breakout",
+        "--from",
+        "2026-09-14",
+        "--to",
+        "2026-09-15",
+    ]
+    ok = runner.invoke(app, [*orb, "--variant", "m5"])
+    assert ok.exit_code == 0, ok.output
+    (run_id,) = run_ids(runs)
+    manifest = read_manifest(RunLayout(runs), run_id)
+    assert (manifest["warmup_bars"], manifest["history_bars"]) == ({}, {"M15": 100})
+    assert manifest["context"]["data"]["engine_history_bars"] == {"M15": 100}
+    summary = json.loads((runs / run_id / "summary.json").read_text(encoding="utf-8"))
+    assert sum(summary[f"status_{s}"] for s in STATUSES) == 4  # 2 ranges x 2 dates
+    # 84 M15 bars before the first decision: the policy run is refused, by bar count; the
+    # fixed stand-in (the tester parity context) reads no ATR and loads no extra history.
+    for tf in (Timeframe.M1, Timeframe.M5, Timeframe.M15, Timeframe.H1):
+        DataLayout(data).canonical_bars("XAUUSD", tf, HISTORY_DAYS[0]).unlink()
+    short = runner.invoke(app, orb)
+    assert short.exit_code == 1
+    assert "warm-up needs 100 completed M15 bars before 2026-09-13" in flat(short.output)
+    fixed = runner.invoke(app, [*orb, "--risk", "fixed"])
+    assert fixed.exit_code == 0, fixed.output
+    assert read_manifest(RunLayout(runs), run_ids(runs)[-1])["history_bars"] == {}
 
 
 def test_run_ids_sort_by_creation_within_one_second() -> None:

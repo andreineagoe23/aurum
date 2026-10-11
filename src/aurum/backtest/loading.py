@@ -105,6 +105,16 @@ class TickLoader:
         )
 
 
+def merge_history(*needs: Mapping[Timeframe, int]) -> dict[Timeframe, int]:
+    """Completed bars per timeframe that meet every requirement (the strategy's warm-up, the
+    engine's own history): the maximum per timeframe, never the sum."""
+    merged: dict[Timeframe, int] = {}
+    for need in needs:
+        for tf, n in need.items():
+            merged[tf] = max(merged.get(tf, 0), n)
+    return merged
+
+
 def plan_market(
     layout: DataLayout,
     symbol: str,

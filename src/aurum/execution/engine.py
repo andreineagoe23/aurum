@@ -30,9 +30,11 @@ A lost connection anywhere in a step is journalled and the step ends; the next s
 trades are never touched. Everything that happens is appended to ``journal``.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from enum import StrEnum
+from types import MappingProxyType
 
 from aurum.core.enums import ExecutionStatus, ExitReason, SessionPhase
 from aurum.core.errors import BrokerDisconnectedError, NoMarketDataError
@@ -70,6 +72,11 @@ __all__ = ["KEY_PREFIX", "Engine", "JournalEntry", "JournalEvent"]
 ATR_BARS = 100
 """Completed M15 bars the spread/ATR gate's ATR is computed over (fixed, so it is
 deterministic whatever history a mode has loaded)."""
+
+HISTORY_BARS: Mapping[Timeframe, int] = MappingProxyType({Timeframe.M15: ATR_BARS})
+"""Completed bars the engine itself reads at a decision, apart from the strategy's
+``warmup_bars``: the M15 ATR for the policy risk engine's spread/ATR gate. A run must load them
+before its first decision (backtests merge the two by maximum per timeframe)."""
 
 
 class JournalEvent(StrEnum):
