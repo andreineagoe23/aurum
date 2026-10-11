@@ -1,0 +1,286 @@
+{
+  "opening_range_breakout/m15/2020-12-15..2025-09-30": {
+    "context": {
+      "account": {
+        "currency": "USD",
+        "initial_balance": 10000.0,
+        "leverage": 500
+      },
+      "code": {
+        "environment_sha256": "f63558cc3a9b48d4f72b1d8054227a8f3d506c9e3504904c7df69869b8f0ce8b",
+        "python": "3.12.15",
+        "source_sha256": "70fe4b3ab2d4ff9e6781073361e9572df1f09f59072b37218c8a086eb4d01c3a"
+      },
+      "config_hash": "7e7512c9483ff2ecaab77c77659a5d6992c77fb25ae15994681a7a2e3d8d290c",
+      "costs": {
+        "bar_spread_extra_points": 2,
+        "commission_per_lot_side": 2.25,
+        "latency_ms": 200,
+        "max_quote_wait_seconds": 60.0,
+        "slippage_points": 5.0
+      },
+      "data": {
+        "engine_history_bars": {
+          "M15": 100
+        },
+        "files": 7045,
+        "first_data_day": "2020-12-05",
+        "history_bars": {
+          "M15": 100
+        },
+        "sha256": "c436de451d509edb1935936cea0930333eb1e2c354ccf00621cd5e0b905ef3c3",
+        "warmup_bars": {}
+      },
+      "first": "2020-12-15",
+      "grid": "c9545c7a81364982202fd5faa95e5b19662707cc2354a770236177dae0146bc3",
+      "last": "2025-09-30",
+      "purpose": "evaluation",
+      "risk": {
+        "engine": "policy",
+        "fixed_volume_lots": null,
+        "policy": {
+          "atr_period": 14,
+          "consecutive_loss_cooldown": 2,
+          "daily_loss_limit_pct": 1.0,
+          "max_open_positions": 1,
+          "max_spread_atr_fraction": 0.15,
+          "max_spread_points": 20,
+          "max_trades_per_day": 3,
+          "min_minutes_before_cutoff": 45,
+          "news_blackout": {
+            "daily_windows": [
+              {
+                "end": "08:45:00",
+                "reason": "08:30 ET releases: NFP, CPI, PPI, retail sales, GDP, jobless claims",
+                "start": "08:20:00"
+              },
+              {
+                "end": "10:15:00",
+                "reason": "10:00 ET releases: ISM, JOLTS, consumer sentiment, home sales",
+                "start": "09:50:00"
+              }
+            ],
+            "fomc_decisions": {
+              "2020-11-05": "FOMC statement",
+              "2020-12-16": "FOMC statement, SEP",
+              "2021-01-27": "FOMC statement",
+              "2021-03-17": "FOMC statement, SEP",
+              "2021-04-28": "FOMC statement",
+              "2021-06-16": "FOMC statement, SEP",
+              "2021-07-28": "FOMC statement",
+              "2021-09-22": "FOMC statement, SEP",
+              "2021-11-03": "FOMC statement",
+              "2021-12-15": "FOMC statement, SEP",
+              "2022-01-26": "FOMC statement",
+              "2022-03-16": "FOMC statement, SEP",
+              "2022-05-04": "FOMC statement",
+              "2022-06-15": "FOMC statement, SEP",
+              "2022-07-27": "FOMC statement",
+              "2022-09-21": "FOMC statement, SEP",
+              "2022-11-02": "FOMC statement",
+              "2022-12-14": "FOMC statement, SEP",
+              "2023-02-01": "FOMC statement",
+              "2023-03-22": "FOMC statement, SEP",
+              "2023-05-03": "FOMC statement",
+              "2023-06-14": "FOMC statement, SEP",
+              "2023-07-26": "FOMC statement",
+              "2023-09-20": "FOMC statement, SEP",
+              "2023-11-01": "FOMC statement",
+              "2023-12-13": "FOMC statement, SEP",
+              "2024-01-31": "FOMC statement",
+              "2024-03-20": "FOMC statement, SEP",
+              "2024-05-01": "FOMC statement",
+              "2024-06-12": "FOMC statement, SEP",
+              "2024-07-31": "FOMC statement",
+              "2024-09-18": "FOMC statement, SEP",
+              "2024-11-07": "FOMC statement (Thursday, after the US election)",
+              "2024-12-18": "FOMC statement, SEP",
+              "2025-01-29": "FOMC statement",
+              "2025-03-19": "FOMC statement, SEP",
+              "2025-05-07": "FOMC statement",
+              "2025-06-18": "FOMC statement, SEP",
+              "2025-07-30": "FOMC statement",
+              "2025-09-17": "FOMC statement, SEP",
+              "2025-10-29": "FOMC statement",
+              "2025-12-10": "FOMC statement, SEP",
+              "2026-01-28": "FOMC statement",
+              "2026-03-18": "FOMC statement, SEP",
+              "2026-04-29": "FOMC statement",
+              "2026-06-17": "FOMC statement, SEP",
+              "2026-07-29": "FOMC statement",
+              "2026-09-16": "FOMC statement, SEP",
+              "2026-10-28": "FOMC statement (scheduled)",
+              "2026-12-09": "FOMC statement, SEP (scheduled)"
+            },
+            "fomc_window": {
+              "end": "15:00:00",
+              "reason": "FOMC statement 14:00 ET and press conference 14:30 ET",
+              "start": "13:30:00"
+            },
+            "timezone": "America/New_York"
+          },
+          "risk_per_trade_pct": 0.25,
+          "stale_quote_seconds": 10.0,
+          "weekly_loss_limit_pct": 2.5
+        }
+      },
+      "sealed_opened": false,
+      "spec": {
+        "path": "docs/strategies/opening_range_breakout.md",
+        "sha256": "413033b6d9d8e878a8c7c99579f6d942fa929dbea8d589b9e9f77c74c23faba9"
+      },
+      "strategy": "opening_range_breakout",
+      "symbol": {
+        "file_sha256": "0426cf8caefd2faa93b5b3b24004db656e2768e139122d2cd34e394b0be0c7ee",
+        "server": "FusionMarkets-Demo",
+        "snapshot": "20261010T000046Z.json",
+        "spec_sha256": "717a215d641a07ee647a5deccbb36b8f04585e07cad32bf7a8114847f1333ce6"
+      },
+      "variant": "m15"
+    },
+    "context_hash": "9e5eee1997580ea2d94573fa6dce4b03168eda29d1a9d0aec429ded367841f30",
+    "frozen_at": "2026-10-11T08:39:12.718907+00:00"
+  },
+  "opening_range_breakout/m5/2020-12-15..2025-09-30": {
+    "context": {
+      "account": {
+        "currency": "USD",
+        "initial_balance": 10000.0,
+        "leverage": 500
+      },
+      "code": {
+        "environment_sha256": "f63558cc3a9b48d4f72b1d8054227a8f3d506c9e3504904c7df69869b8f0ce8b",
+        "python": "3.12.15",
+        "source_sha256": "70fe4b3ab2d4ff9e6781073361e9572df1f09f59072b37218c8a086eb4d01c3a"
+      },
+      "config_hash": "7e7512c9483ff2ecaab77c77659a5d6992c77fb25ae15994681a7a2e3d8d290c",
+      "costs": {
+        "bar_spread_extra_points": 2,
+        "commission_per_lot_side": 2.25,
+        "latency_ms": 200,
+        "max_quote_wait_seconds": 60.0,
+        "slippage_points": 5.0
+      },
+      "data": {
+        "engine_history_bars": {
+          "M15": 100
+        },
+        "files": 7045,
+        "first_data_day": "2020-12-05",
+        "history_bars": {
+          "M15": 100
+        },
+        "sha256": "c436de451d509edb1935936cea0930333eb1e2c354ccf00621cd5e0b905ef3c3",
+        "warmup_bars": {}
+      },
+      "first": "2020-12-15",
+      "grid": "c9545c7a81364982202fd5faa95e5b19662707cc2354a770236177dae0146bc3",
+      "last": "2025-09-30",
+      "purpose": "evaluation",
+      "risk": {
+        "engine": "policy",
+        "fixed_volume_lots": null,
+        "policy": {
+          "atr_period": 14,
+          "consecutive_loss_cooldown": 2,
+          "daily_loss_limit_pct": 1.0,
+          "max_open_positions": 1,
+          "max_spread_atr_fraction": 0.15,
+          "max_spread_points": 20,
+          "max_trades_per_day": 3,
+          "min_minutes_before_cutoff": 45,
+          "news_blackout": {
+            "daily_windows": [
+              {
+                "end": "08:45:00",
+                "reason": "08:30 ET releases: NFP, CPI, PPI, retail sales, GDP, jobless claims",
+                "start": "08:20:00"
+              },
+              {
+                "end": "10:15:00",
+                "reason": "10:00 ET releases: ISM, JOLTS, consumer sentiment, home sales",
+                "start": "09:50:00"
+              }
+            ],
+            "fomc_decisions": {
+              "2020-11-05": "FOMC statement",
+              "2020-12-16": "FOMC statement, SEP",
+              "2021-01-27": "FOMC statement",
+              "2021-03-17": "FOMC statement, SEP",
+              "2021-04-28": "FOMC statement",
+              "2021-06-16": "FOMC statement, SEP",
+              "2021-07-28": "FOMC statement",
+              "2021-09-22": "FOMC statement, SEP",
+              "2021-11-03": "FOMC statement",
+              "2021-12-15": "FOMC statement, SEP",
+              "2022-01-26": "FOMC statement",
+              "2022-03-16": "FOMC statement, SEP",
+              "2022-05-04": "FOMC statement",
+              "2022-06-15": "FOMC statement, SEP",
+              "2022-07-27": "FOMC statement",
+              "2022-09-21": "FOMC statement, SEP",
+              "2022-11-02": "FOMC statement",
+              "2022-12-14": "FOMC statement, SEP",
+              "2023-02-01": "FOMC statement",
+              "2023-03-22": "FOMC statement, SEP",
+              "2023-05-03": "FOMC statement",
+              "2023-06-14": "FOMC statement, SEP",
+              "2023-07-26": "FOMC statement",
+              "2023-09-20": "FOMC statement, SEP",
+              "2023-11-01": "FOMC statement",
+              "2023-12-13": "FOMC statement, SEP",
+              "2024-01-31": "FOMC statement",
+              "2024-03-20": "FOMC statement, SEP",
+              "2024-05-01": "FOMC statement",
+              "2024-06-12": "FOMC statement, SEP",
+              "2024-07-31": "FOMC statement",
+              "2024-09-18": "FOMC statement, SEP",
+              "2024-11-07": "FOMC statement (Thursday, after the US election)",
+              "2024-12-18": "FOMC statement, SEP",
+              "2025-01-29": "FOMC statement",
+              "2025-03-19": "FOMC statement, SEP",
+              "2025-05-07": "FOMC statement",
+              "2025-06-18": "FOMC statement, SEP",
+              "2025-07-30": "FOMC statement",
+              "2025-09-17": "FOMC statement, SEP",
+              "2025-10-29": "FOMC statement",
+              "2025-12-10": "FOMC statement, SEP",
+              "2026-01-28": "FOMC statement",
+              "2026-03-18": "FOMC statement, SEP",
+              "2026-04-29": "FOMC statement",
+              "2026-06-17": "FOMC statement, SEP",
+              "2026-07-29": "FOMC statement",
+              "2026-09-16": "FOMC statement, SEP",
+              "2026-10-28": "FOMC statement (scheduled)",
+              "2026-12-09": "FOMC statement, SEP (scheduled)"
+            },
+            "fomc_window": {
+              "end": "15:00:00",
+              "reason": "FOMC statement 14:00 ET and press conference 14:30 ET",
+              "start": "13:30:00"
+            },
+            "timezone": "America/New_York"
+          },
+          "risk_per_trade_pct": 0.25,
+          "stale_quote_seconds": 10.0,
+          "weekly_loss_limit_pct": 2.5
+        }
+      },
+      "sealed_opened": false,
+      "spec": {
+        "path": "docs/strategies/opening_range_breakout.md",
+        "sha256": "413033b6d9d8e878a8c7c99579f6d942fa929dbea8d589b9e9f77c74c23faba9"
+      },
+      "strategy": "opening_range_breakout",
+      "symbol": {
+        "file_sha256": "0426cf8caefd2faa93b5b3b24004db656e2768e139122d2cd34e394b0be0c7ee",
+        "server": "FusionMarkets-Demo",
+        "snapshot": "20261010T000046Z.json",
+        "spec_sha256": "717a215d641a07ee647a5deccbb36b8f04585e07cad32bf7a8114847f1333ce6"
+      },
+      "variant": "m5"
+    },
+    "context_hash": "fd9370cbb7089543acb39be960c64f653fe6ef5b147c12f4fd30dc37f232d444",
+    "frozen_at": "2026-10-11T08:47:21.630970+00:00"
+  }
+}
