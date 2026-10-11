@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; strategy, grid, diagnostics and the merged engine history **implemented and tested** (synthetic tests + the existing development traces, no P&L); **awaiting implementation review before the 12 trials** (queue A3) | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **stopped before analysis** (queue A3) | — |
 
 ## Work queue (in order)
 
@@ -115,11 +115,12 @@ _Last updated: 2026-10-11._
      1,145/1,374 = 83.33%, **combined 91.97%**. uv 0.12.24 installed from the lock unchanged;
      cache saved; artifacts `coverage-ubuntu-latest-py3.12` and `coverage-macos-latest-py3.12`
      uploaded.
-   - **Latest recorded run (2026-10-11 08:28 UTC):** run 38124934320 on `a182036` (the
-     opening_range_breakout freeze, implementation, trace evidence and docs). **Success**;
-     both jobs passed every step: **409 passed, 11 skipped**. Coverage was identical on both:
-     7,344 statements (429 missed), 1,684 branches (185 partial), **combined 92.27%**, above
-     the 91 floor. The commit that records this result is not itself recorded here.
+   - **Latest recorded run (2026-10-11 08:31 UTC):** run 38125080756 on `b5ea565`, the
+     reviewed state of the ORB implementation (run 38124934320 on `a182036` had the same
+     result). **Success**; both jobs passed every step: **409 passed, 11 skipped**. Coverage
+     was identical on both: 7,344 statements (429 missed), 1,684 branches (185 partial),
+     **combined 92.27%**, above the 91 floor. The commit that records this result is not
+     itself recorded here.
    - No README badge: the repo is private, so the badge image does not render outside GitHub
      sessions with access.
 
@@ -418,9 +419,42 @@ failed".
    - **Open for the evaluation step:** `walkforward.deflated_sharpe` raises on a zero-variance
      series (fails closed). Listing undefined trial SRs and failing gate 12 explicitly belong
      in the ORB evaluation script, with a test, when the trials are authorised.
-7. **Run the 12 development trials** (`aurum backtest grid opening_range_breakout --variant
-   m15|m5 --from 2020-12-15 --to 2025-09-30`). **Not authorised. Claude stops for
-   implementation review before the 12 trials.**
+7. ~~**Run the 12 development trials**~~. The reviewer approved the implementation for the
+   12 declared trials at `b5ea565` (2026-10-11). **Done**, 08:39–08:56Z, m15 then m5, no
+   `--retry-failed`.
+   - Preflight: clean worktree at `b5ea565`; pinned snapshot hash matches; a dry `prepare` of
+     both variants differed only by `variant`; no earlier ORB batch, attempt or trial; ledger
+     integrity ok; consistent pre-run backup (below).
+   - Invocation: `uv run` cannot start from the agent's process (os error 448), so the
+     approved commands ran as `python -S` of the venv's interpreter build with only the venv's
+     site-packages (`python -m aurum.cli backtest grid ...`). Nothing was synced or
+     installed. The recorded environment sha256 (`f63558cc…`) equals the trend_pullback
+     batches' under `uv run --no-sync`.
+   - Batches: `opening_range_breakout/m15/2020-12-15..2025-09-30`, context `9e5eee19…`;
+     `opening_range_breakout/m5/2020-12-15..2025-09-30`, context `fd9370cb…`. They differ only
+     by `variant`: source `70fe4b3a…`, spec `413033b6…`, config `7e7512c9…`, snapshot
+     `0426cf8c…`, data `c436de45…` (7,045 files from 2020-12-05, with the 100-bar M15
+     history), grid `c9545c7a…`.
+   - 12 points, 12 attempts (all succeeded), 12 trials, 12 published runs; 0 failed,
+     0 unfinished, 0 retries, 0 artifacts pending, nothing staged. Both grid logs end
+     `6 points: 6 resolved, 0 unresolved, 0 with artifacts pending`, exit 0.
+   - Range-date status coverage: every trial has 2,474 range-dates (1,237 dates × 2), and its
+     statuses and counters equal the feasibility CSV for its variant and `or_bars`.
+   - Ledger: integrity ok; 76 trial rows re-hashed, 0 mismatches; sealed openings 0, parity
+     accesses 0; latest ORB `data_end` 2025-09-30T23:00Z.
+   - Backups: pre-run `trials_20261011T0838Z_before_opening_range_breakout_dev_grid.sqlite`
+     (sha256 `1a140ad3…`, equal to the post-trend_pullback backup: the ledger was unchanged
+     in between); post-run `trials_20261011T0855Z_after_opening_range_breakout_dev_grid.sqlite`
+     (`f30f9870…`, 76 trials, 66 attempts).
+   - Inventory (read-only, no trade or P&L figure, reproducible byte for byte):
+     `scripts/opening_range_breakout_dev_batch.py` →
+     `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_batch.md`, `_index.csv`,
+     `_contexts.json`.
+8. **Evaluation script** (next, not started): the registered section 16 analysis, read-only,
+   with the undefined-Sharpe DSR handling (an undefined candidate SR or V fails gate 12;
+   undefined trial SRs are listed, kept in N and left out of V) and synthetic tests for it,
+   **before** it is used. **Claude stops before analysis.** Not authorised: stress, replay,
+   baseline, sealed tests, candidate selection.
 
 ### B. Later, tracked
 
@@ -446,15 +480,17 @@ failed".
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Implementation review of opening_range_breakout 0.1.0** before the 12 trials (queue A3).
+- **Review of the opening_range_breakout batch inventory** before analysis (queue A3).
+- **The live tick collector is not running** (last heartbeat 2026-10-10 16:42Z, found
+  2026-10-11). Restart it deliberately when convenient; Claude did not start or touch it.
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
 - Write each strategy spec (`docs/STRATEGY_SPEC_TEMPLATE.md`) **before any code**, including the
   stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
-  Opening-range breakout: 0.1.0 frozen and implemented on 2026-10-11, awaiting implementation
-  review before its trials (queue A3). Then VWAP reversion.
+  Opening-range breakout: 0.1.0 frozen and implemented; its 12 development trials ran on
+  2026-10-11; stopped before analysis (queue A3). Then VWAP reversion.
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
@@ -474,7 +510,7 @@ failed".
 
 - This checkout runs on the **Windows 11 ARM VM** (`C:\code\aurum`), venv `C:\venvs\aurum`
   (x64 Python under emulation), data `C:\aurum-data` (`AURUM_DATA_DIR`). The live tick
-  collector runs there continuously; don't stop it.
+  collector normally runs there continuously; don't stop it (found stopped on 2026-10-11, see C).
 - **Editing `pyproject.toml` on the VM breaks `uv run` while the collector runs.** uv sees the
   file's new mtime, rebuilds the editable install, and fails to replace
   `C:\venvs\aurum\Scripts\aurum.exe` (os error 32), which the collector holds open. Found
@@ -488,4 +524,4 @@ failed".
 - Test suite: 420 tests (411 passed, 9 skipped on the VM: 6 live-market checks with the market
   closed, 2 demo-order tests, 1 non-Windows test), ~2.5 min with coverage, 92.33% combined on
   the VM (2026-10-11, after the opening_range_breakout implementation). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 409 passed,
-  11 skipped, 92.27% (run 38124934320 on `a182036`, item 6).
+  11 skipped, 92.27% (run 38125080756 on `b5ea565`, item 6).
