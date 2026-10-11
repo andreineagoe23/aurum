@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **draft 0.1.0, revision 2**, O1–O8 accepted in principle; **awaiting final spec review**, not frozen, not approved for implementation (queue A3) | — |
+| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; strategy, grid, diagnostics and the merged engine history **implemented and tested** (synthetic tests + the existing development traces, no P&L); **awaiting implementation review before the 12 trials** (queue A3) | — |
 
 ## Work queue (in order)
 
@@ -115,10 +115,11 @@ _Last updated: 2026-10-11._
      1,145/1,374 = 83.33%, **combined 91.97%**. uv 0.12.24 installed from the lock unchanged;
      cache saved; artifacts `coverage-ubuntu-latest-py3.12` and `coverage-macos-latest-py3.12`
      uploaded.
-   - **Latest recorded run (2026-10-10 23:47 UTC):** run 38096228506 on `46c29c2` (the
-     trend_pullback close-out and the first ORB draft). **Success**; both jobs passed every
-     step: **402 passed, 11 skipped**. Coverage was identical on both: 7,115 statements (427
-     missed), 1,632 branches (183 partial), **combined 92.07%**, above the 91 floor.
+   - **Latest recorded run (2026-10-11 08:28 UTC):** run 38124934320 on `a182036` (the
+     opening_range_breakout freeze, implementation, trace evidence and docs). **Success**;
+     both jobs passed every step: **409 passed, 11 skipped**. Coverage was identical on both:
+     7,344 statements (429 missed), 1,684 branches (185 partial), **combined 92.27%**, above
+     the 91 floor. The commit that records this result is not itself recorded here.
    - No README badge: the repo is private, so the badge image does not render outside GitHub
      sessions with access.
 
@@ -338,7 +339,8 @@ failed".
      writing `docs/strategies/evidence/opening_range_breakout_2026-10-11_feasibility.{md,csv}`.
      - It uses the backtests' `TradingCalendar` and the risk engine's `NewsBlackout`, and opens
        only bar files dated ≤ 2025-09-30, selected by name.
-     - It reads nothing after each range's spending close, and runs no fill, exit or P&L.
+     - It loads whole development files but uses no price after each range's spending close,
+       and runs no fill, exit or P&L (wording corrected at the freeze, item 5).
      - A second run reproduced both files byte for byte.
      - It reproduces exactly the first draft's counts on the 1,237 market trading dates. The
        scratch scripts used weekdays; the 14 extra weekdays were holidays without a range.
@@ -360,8 +362,65 @@ failed".
      - the short stop arithmetic written out (`stop = H + 0.20`,
        `d = round((H − ref)/point) + 20`);
      - the 20-point buffer is fixed and not linked to `risk.yaml`.
-4. Not authorised: further exploratory rule search, implementation, P&L, backtests, sealed
-   access or ledger changes. **Claude stops for final spec review.**
+4. ~~**Final spec review**~~ (2026-10-11): approved for freezing, implementation and
+   deterministic tests only, with four documentation corrections. No trading-rule redesign.
+5. ~~**Freeze 0.1.0**~~ (`d06ca37`). No rule changed. The corrections:
+   - the feasibility script loads whole development files: the spec says no price after a
+     spending close is *used* for any fill, exit, return or P&L, not that none was read (also
+     in the script docstring and the evidence page, regenerated: only those lines changed, the
+     CSV is byte-identical);
+   - a timeout deadline requests a close and does not guarantee a fill; a signal while an
+     earlier position or order remains is still rejected (exposure);
+   - `stop_below_minimum` is `d < max(500, trade_stops_level + 10)`;
+   - an undefined candidate SR or an undefined V fails gate 12; undefined trial SRs stay in
+     N, are listed, and are left out of V.
+6. ~~**Implementation and deterministic tests**~~ (`2e2a617`, `0a7f37e`, `a182036`).
+   - **Strategy** `aurum.strategies.opening_range_breakout` (config `spec:` set, still
+     `enabled: false`). Stateless: at every call it re-walks each range window of the date up
+     to now, from completed bars, the calendar (`session_at`) and the risk engine's
+     `NewsBlackout` (one object, built in `prepare`, shared with the risk engine).
+   - **Diagnostics and statuses:** `data_gap`, `blackout_skipped`, `stop_below_minimum`,
+     `stop_above_cap` and `status_<s>` for the seven statuses, in the run summary. Each
+     range-date keeps its latest walk, so an instant counts once however often the strategy
+     is called. Statuses are as of the strategy's latest call on that date; a date on which
+     it is never called is not counted (the engine calls at every OPEN decision close).
+   - **Grid:** `or_bars` {2, 4} × `target_r` {1.0, 1.5, 2.0}, 6 per variant, 12 in all;
+     params accept only those values.
+   - **Engine history** (separate from the strategy): `engine.HISTORY_BARS` = 100 M15 bars
+     with the policy risk engine, none with `--risk fixed`. `prepare` loads
+     `merge_history(strategy.warmup_bars, engine)`, the maximum per timeframe, by bar count.
+     The context records `warmup_bars`, `engine_history_bars` and `history_bars`.
+     - trend_pullback: merged = its own (504 H1, 509 M15, 3 M5), so its input files are
+       unchanged. Reference parity (`--risk fixed`): no extra history, same window.
+     - **Behaviour change:** a policy-risk run now needs 100 M15 bars before its first
+       decision. A reference baseline starting on the store's first day (2020-11-12) is now
+       refused; a like-for-like rerun over 2020-12-15 … 2025-09-30 is not affected.
+   - **Tests** (`tests/unit/test_opening_range_breakout.py`, 6, plus one in
+     `test_backtest_cli.py`): anchors and eligible-time counts per DST regime (normal, both
+     mismatch directions, summer) against the spec section 6 table; an early close clipping
+     the New York window (`no_decision_time`); a session layout where London instants fall
+     in another session; equality boundaries; stop bounds 499/500/2,000/2,001 and the
+     stops-level minimum; float-noise and off-grid rounding; blackout instants; data gaps
+     (range bar, at a blackout instant, later); one use; restart before and after the spend;
+     diagnostic deduplication; exactly 12 declared points; the section 17 trace; risk-history
+     loading end to end on the synthetic store (refused by bar count with 84 M15 bars).
+   - **Mutation check:** 21 targeted rule mutations, 20 caught. The survivor (the call-time
+     session check in `on_bar`) is equivalent for decisions: the walk only spends at
+     eligible instants.
+   - **Existing development traces** (`scripts/opening_range_breakout_trace_check.py`,
+     read-only, no P&L, no ledger): the strategy, called as the engine calls it, reproduces
+     every one of the 9,896 feasibility range-dates (status, `W`, spend time, `d`, eligible
+     times, counters): **0 mismatches**. Signals emitted equal the `signal` statuses, and
+     the section 17 trace is reproduced. Reruns byte-identical. Evidence
+     `docs/strategies/evidence/opening_range_breakout_2026-10-11_trace_check.md`.
+   - **Not done, by instruction:** no development backtest, P&L, trial, sealed opening,
+     real-data parity, new feasibility variant or production-ledger write.
+   - **Open for the evaluation step:** `walkforward.deflated_sharpe` raises on a zero-variance
+     series (fails closed). Listing undefined trial SRs and failing gate 12 explicitly belong
+     in the ORB evaluation script, with a test, when the trials are authorised.
+7. **Run the 12 development trials** (`aurum backtest grid opening_range_breakout --variant
+   m15|m5 --from 2020-12-15 --to 2025-09-30`). **Not authorised. Claude stops for
+   implementation review before the 12 trials.**
 
 ### B. Later, tracked
 
@@ -387,15 +446,15 @@ failed".
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
-- **Final review of the opening_range_breakout spec**, revision 2 (queue A3).
+- **Implementation review of opening_range_breakout 0.1.0** before the 12 trials (queue A3).
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
 - Write each strategy spec (`docs/STRATEGY_SPEC_TEMPLATE.md`) **before any code**, including the
   stop-size cap (§8a, derived per spec). Trend-pullback: drafted by Claude on 2026-10-10 at the
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
-  Opening-range breakout: draft 0.1.0 revision 2 on 2026-10-11, awaiting final spec review (queue A3). Then VWAP
-  reversion.
+  Opening-range breakout: 0.1.0 frozen and implemented on 2026-10-11, awaiting implementation
+  review before its trials (queue A3). Then VWAP reversion.
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.
@@ -426,7 +485,7 @@ failed".
     deliberately;
   - never work around this by editing file timestamps.
 - Backtest runs: `reports/runs/<run_id>/` (git-ignored). Trial ledger: `<data>/ledger/`.
-- Test suite: 413 tests (404 passed, 9 skipped on the VM: 6 live-market checks with the market
-  closed, 2 demo-order tests, 1 non-Windows test), ~2 min with coverage, 92.13% combined on
-  the VM (2026-10-10, after the Phase 5 development analysis). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 402 passed,
-  11 skipped, 92.07% (run 38096228506 on `46c29c2`, item 6).
+- Test suite: 420 tests (411 passed, 9 skipped on the VM: 6 live-market checks with the market
+  closed, 2 demo-order tests, 1 non-Windows test), ~2.5 min with coverage, 92.33% combined on
+  the VM (2026-10-11, after the opening_range_breakout implementation). Keep it lean (see `CLAUDE.md`). CI on Linux/macOS: 409 passed,
+  11 skipped, 92.27% (run 38124934320 on `a182036`, item 6).
