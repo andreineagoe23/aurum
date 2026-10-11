@@ -1,0 +1,78 @@
+diff --git a/docs/strategies/vwap_reversion.md b/docs/strategies/vwap_reversion.md
+index d280cd4..cf22060 100644
+--- a/docs/strategies/vwap_reversion.md
++++ b/docs/strategies/vwap_reversion.md
+@@ -39,7 +39,7 @@ V16 and V17 are new in revision 2.
+ | V14 | Phase 5 stop rule | If neither variant survives, the three-family lab ends (section 16) | Charter kill criterion | — | Yes |
+ | V15 | Trial accounting | N = 66 + vwap_reversion research trials actually recorded (section 16) | Existing ORB §14 / O6 rule | — | No |
+ | V16 | Direction coverage | Longs and shorts, exact mirror (table 5a); gate 8 unchanged | The hypothesis is symmetric; gate 8 needs both sides | Long-only: a post-results idea (section 18), not proposed | Yes (shorts lost in both earlier families; not used) |
+-| V17 | Statistics measured on dates now sealed | Accept, disclosed: V5 and V6 cite spread and intra-bar statistics computed before the seal existed, partly on dates now in the sealed period (section 18) | Cost and fill-structure statistics, not P&L; the same figures already set `risk.yaml` `max_spread_points` and `backtest.yaml` `bar_spread_extra_points` | Re-derive from development-period bars: needs a data-reading approval; per-quote spreads do not exist before 2026-03-29 | No |
++| V17 | Statistics measured on dates now sealed | Accept, disclosed: V5, V6 and the cost illustration behind V8 (section 13.3, quoted in section 2) cite spread and intra-bar statistics computed before the seal existed, on dates wholly (spreads) or partly (intra-bar table) in the sealed period; sections 3.1 and 18 cite the release spread spikes recorded there (section 18) | Cost and fill-structure statistics, not P&L; the same figures already set `risk.yaml` `max_spread_points` and `backtest.yaml` `bar_spread_extra_points` | Re-derive from development-period bars: needs a data-reading approval; per-quote spreads do not exist before 2026-03-29 | No |
+ 
+ ## 1. Identity
+ 
+@@ -302,10 +302,12 @@ At a decision instant T, `d` = the decision bar closing at T and `p` = its previ
+ ### 6.1 Decision instants and exact times
+ 
+ A **decision instant** of variant v for session `s` is T such that: T is a close of v's
+-timeframe; `session_at(T)` is `s` with entries allowed (`A ≤ T < E`; a close exactly at `E`
+-is not a decision instant); and T is not in a news blackout window. These are exactly the
+-instants at which the engine asks the strategy for a signal (`Engine._step`: phase OPEN and a
+-close of the decision timeframe), minus blackout instants.
++timeframe; `session_at(T)` is `s` with entries allowed; `A + 60 min < T ≤ E − 15 min`, the
++only instants at which a setup can be active (sections 5 and 6.2); and T is not in a news
++blackout window. The engine asks the strategy at every OPEN close of the decision timeframe
++(`Engine._step`); at any other of those calls the strategy returns nothing and counts
++nothing. In particular `T = A`, where `B(A)` is empty and `TWV` cannot exist, is not a
++decision instant. No trade changes: outside this range trigger rule 2 cannot hold.
+ 
+ Times with today's `sessions.yaml` (London wall clock; New York = London − 5 h in normal
+ weeks, − 4 h in mismatch weeks; UTC = London in UK winter, London − 1 h in UK summer):
+@@ -437,9 +439,14 @@ strategy is called; only while the session-date is unspent unless stated):
+ | `stop_above_cap` | spend whose `d_S` exceeds 2,000 (section 8a) — at the spend |
+ | `reward_risk_below_min` | spend with `d_T < d_S` (section 9) — at the spend |
+ 
+-**Session-date status** (exactly one): `signal`, `stop_below_minimum`, `stop_above_cap`,
+-`reward_risk_below_min`, `no_trigger` (complete session, no spend), `data_gap` (read set
+-incomplete before any spend), `twv_undefined`, or `no_decision_time`.
++**Session-date status** (exactly one, the first that applies):
++
++1. spent: `signal`, `stop_below_minimum`, `stop_above_cap` or `reward_risk_below_min`, from
++   the spend (section 6.3);
++2. `no_decision_time`: the session-date has no decision instant (section 6.1);
++3. `data_gap`: at some decision instant the read set of trigger rule 6 was incomplete;
++4. `twv_undefined`: at some decision instant the read set was complete and `Σ w_i = 0`;
++5. `no_trigger`: otherwise.
+ 
+ **Engine-side outcomes** (from the journal, reported per variant, not strategy state): signals,
+ risk rejections by reason, broker rejections, unknown outcomes, fills.
+@@ -970,7 +977,10 @@ Date: a UK-summer trading date (normal week), `ldn_ny_overlap`, `A` = 13:00 Lond
+   days 2026-06-26 … 10-08) were measured before the sealed period was defined (2026-10-10)
+   and lie wholly or partly inside it. They are cost and fill-structure figures, not P&L, and
+   the same figures already set `max_spread_points` and `bar_spread_extra_points`. V5 (buffer
+-  25) and V6 (minimum 500) cite them. Using them is a disclosed exception, not an inspection
++  25) and V6 (minimum 500) cite them; so do the cost illustration of section 13.3 (median
++  spread 6 → zero-edge cost ≈ 18 points, 0.8–4.1%, the break-even rates and the 1.8-point
++  hurdle given as V8's reason, also in section 2) and, qualitatively, the release spread
++  spikes of sections 3.1 and 18. No rule value depends on the section 13.3 figures. Using them is a disclosed exception, not an inspection
+   of the sealed period for this family.
+ - **Choices those results could have influenced, and how they were made:**
+   - **Fading moves at all.** The planned family predates every result, but two momentum
+@@ -1060,7 +1070,7 @@ rule, cases go in tables or hypothesis properties inside a few tests, not one te
+ 
+ **Data and environment (each needs its own approval, section 18b):**
+ 
+-- [ ] Section 8a re-read from the pinned snapshot.
++- [ ] Section 8a re-read from the pinned snapshot (at B2).
+ - [ ] Real-data trace on development bars (no P&L, no ledger).
+ - [ ] Dry `prepare` of both variants: contexts differ only by `variant`.
+ - [ ] Ledger integrity check and a pre-run backup; collector state recorded.
+@@ -1081,7 +1091,7 @@ Claude stops at each boundary; one approval never covers the next.
+ |---|---|---|---|
+ | B0 | Review of this draft; decisions V1–V17 | owner | no |
+ | B1 | Feasibility diagnostics (optional): descriptive counts on development bars ≤ 2025-09-30, no fill, exit or P&L; any rule change after them is listed as data-informed | separate approval | yes, development only |
+-| B2 | Freeze 0.1.0 | owner | no |
++| B2 | Re-read the section 8a inputs and `trade_stops_level` from the pinned snapshot (hash checked) and record them in 8a; then freeze 0.1.0 | owner, approving that snapshot read explicitly | pinned symbol snapshot only |
+ | B3 | Implementation and deterministic tests (synthetic data only) | separate approval | no |
+ | B4 | Real-data trace check (no P&L, no ledger) | separate approval | yes, development only |
+ | B5 | Prerequisites: tester-parity decision (complete it, or proceed without it with the reason recorded); analysis script committed and tested; ledger backup | owner | no |

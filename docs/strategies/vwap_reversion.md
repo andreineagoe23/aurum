@@ -3,20 +3,25 @@
 > **DRAFT — NOT FROZEN — NOT IMPLEMENTED — NO TRIALS AUTHORISED.**
 >
 > - Written by Claude from `docs/STRATEGY_SPEC_TEMPLATE.md` at the owner's request
->   (2026-10-11: "documentation-only draft of vwap_reversion 0.1.0"). Revision 2 answers the
->   owner's first B0 review (2026-10-11); the changes are listed in section 19.
+>   (2026-10-11: "documentation-only draft of vwap_reversion 0.1.0"). Revision 2 answered the
+>   owner's first B0 review; revision 3 applies the B0 audit's documentation corrections
+>   (both 2026-10-11). The changes are listed in section 19.
 > - **No market data was read for this draft**: no bars, ticks, feature stores, trade tables,
 >   ledger rows or symbol snapshots, and no feasibility count was run. Every number below is a
 >   rule choice, arithmetic, or a figure quoted from a committed document or config (cited
 >   where used).
-> - Nothing here is approved. Decisions V1–V17 (section 0) are open for review. No code, config
->   change, feasibility diagnostic, trace, trial or ledger write is authorised by this draft.
+> - **B0 decided (owner, 2026-10-11):** decisions V1–V17 (section 0) accepted with the
+>   proposed defaults; V17 explicitly, with the disclosure as corrected in revision 3. The
+>   draft is **not frozen**. No snapshot read, freeze, code, config change, feasibility
+>   diagnostic, test, trace, trial, ledger, parity or sealed access is authorised (B1 onward,
+>   section 18b).
 > - **Written after two rejected families.** The author has read the trend_pullback 0.2.0 and
 >   opening_range_breakout 0.1.0 development results, including their splits. Section 18
 >   lists what was seen and which choices it could have influenced.
 
-## 0. Decisions open for review
+## 0. Decisions (accepted at B0, 2026-10-11; not frozen)
 
+All seventeen were accepted by the owner with the proposed defaults below; V17 explicitly.
 None is data-informed in the sense of the ORB spec (no count or P&L was computed for this
 family). "Prior results" marks a choice the author made knowing the earlier families' results.
 V16 and V17 are new in revision 2.
@@ -39,7 +44,7 @@ V16 and V17 are new in revision 2.
 | V14 | Phase 5 stop rule | If neither variant survives, the three-family lab ends (section 16) | Charter kill criterion | — | Yes |
 | V15 | Trial accounting | N = 66 + vwap_reversion research trials actually recorded (section 16) | Existing ORB §14 / O6 rule | — | No |
 | V16 | Direction coverage | Longs and shorts, exact mirror (table 5a); gate 8 unchanged | The hypothesis is symmetric; gate 8 needs both sides | Long-only: a post-results idea (section 18), not proposed | Yes (shorts lost in both earlier families; not used) |
-| V17 | Statistics measured on dates now sealed | Accept, disclosed: V5 and V6 cite spread and intra-bar statistics computed before the seal existed, partly on dates now in the sealed period (section 18) | Cost and fill-structure statistics, not P&L; the same figures already set `risk.yaml` `max_spread_points` and `backtest.yaml` `bar_spread_extra_points` | Re-derive from development-period bars: needs a data-reading approval; per-quote spreads do not exist before 2026-03-29 | No |
+| V17 | Statistics measured on dates now sealed | Accept, disclosed: V5, V6 and the cost illustration behind V8 (section 13.3, quoted in section 2) cite spread and intra-bar statistics computed before the seal existed, on dates wholly (spreads) or partly (intra-bar table) in the sealed period; sections 3.1 and 18 cite the release spread spikes recorded there (section 18) | Cost and fill-structure statistics, not P&L; the same figures already set `risk.yaml` `max_spread_points` and `backtest.yaml` `bar_spread_extra_points` | Re-derive from development-period bars: needs a data-reading approval; per-quote spreads do not exist before 2026-03-29 | No |
 
 ## 1. Identity
 
@@ -49,7 +54,7 @@ V16 and V17 are new in revision 2.
 - Variants: `m15` and `m5`. They share the mean, regime, setups, stop, target, timeout, spend
   rule and grid; they differ in the decision bars of the trigger (M15 or M5), which changes
   the confirmation level, the decision instants and the timing (section 6.4).
-- Version: `0.1.0` (draft, revision 2)
+- Version: `0.1.0` (draft, revision 3)
 - Author: Claude (draft) for Andrei Neagoe
 - Date: 2026-10-11
 
@@ -57,10 +62,10 @@ V16 and V17 are new in revision 2.
 
 **Provenance.** Two layers with different standing:
 
-- **Planned before any result:** the broad family. MASTER_PROMPT §7 Phase 5 lists "VWAP /
-  structure reversion: non-trending H1 regime; M15 deviation from session VWAP into a
-  structural level; M5 rejection candle". It was written, and the config scaffolded, before
-  any backtest existed.
+- **Planned before any result:** the broad family. The Phase 5 family table of MASTER_PROMPT
+  §7 plans "VWAP / structure reversion" with, paraphrased (not quoted): a non-trending H1
+  regime, an M15 deviation from the session VWAP into a structural level, and an M5
+  rejection candle. It was written, and the config scaffolded, before any backtest existed.
 - **Designed now, after two failed families:** every detailed rule in sections 3–14. These
   are new choices, not the pre-results plan. They are not an unseen-data test of the planned
   idea; the cumulative DSR (section 16) counts the earlier 66 trials for that reason.
@@ -116,8 +121,10 @@ Nothing with `close_time > T` is used at T.
   London trading date D, from `configs/sessions.yaml` through `TradingCalendar` (Europe/London
   wall clock, DST via `zoneinfo`, `E` clipped by an early close). Today's values:
   `london_morning` 07:00–11:00 and `ldn_ny_overlap` 13:00–16:30 London; the config is the
-  source. Both start and end on whole hours or half hours, so every boundary is an M5 and M15
-  close in every DST regime.
+  source. Both start and end on whole hours or half hours, so every configured boundary is an
+  M5 and M15 close in every DST regime. An `E` clipped by an early close need not be (a
+  16:31 cutoff, for example); the rules stay well defined because they compare times with
+  `≤` and `<`, and no evaluated date clips either session (section 5).
 - **Previous bar** of a bar = the bar of the same timeframe whose `open_time` is one timeframe
   earlier. If it does not exist, any rule needing it is false and the instant counts as a
   `data_gap` (section 6).
@@ -197,7 +204,9 @@ releases), so a release inside the accumulation period can weigh heavily in TWV.
 
 `ATR(Ts)` = `aurum.features.indicators.atr(high, low, close, 14)` over the **100 newest M15
 bars with `close_time ≤ Ts`**, Wilder's ATR exactly as the risk engine computes it at a
-decision (`aurum.execution.engine.ATR_BARS`, `risk.yaml` `atr_period` 14). Fewer than 15
+decision (`aurum.execution.engine.ATR_BARS`; period `RiskConfig.atr_period`, default 14 in
+`aurum/settings.py` and not set in `risk.yaml`, passed to the engine by
+`aurum.backtest.pipeline`). Fewer than 15
 bars → no ATR → no setup. It is the volatility unit of the setup (section 5) and is fixed at
 `Ts`; it is not recomputed at the trigger.
 
@@ -249,8 +258,8 @@ A **setup** is an M15 bar `b_s` of session `s` on date D, closing at `Ts`, that 
 4. **Structural level — strict new session extreme:** side rule (table 5a), against every M15
    bar of the session with `open_time ≥ A` and `close_time < Ts`. With rule 1 there are always
    at least 3 such bars.
-5. **Read set complete:** every M5 slot and every M15 slot in `[A, Ts)` has a bar, and
-   `TWV(Ts)` and `ATR(Ts)` exist.
+5. **Read set complete:** every M5 slot and every M15 slot with `open_time ≥ A` and
+   `close_time ≤ Ts` has a bar, and `TWV(Ts)` and `ATR(Ts)` exist.
 6. **No release inside the bar:** no instant of `[open_time(b_s), close_time(b_s)]` (closed
    interval) lies in a news blackout window (`NewsBlackout.reason_at` not None; section 12).
 
@@ -302,10 +311,12 @@ At a decision instant T, `d` = the decision bar closing at T and `p` = its previ
 ### 6.1 Decision instants and exact times
 
 A **decision instant** of variant v for session `s` is T such that: T is a close of v's
-timeframe; `session_at(T)` is `s` with entries allowed (`A ≤ T < E`; a close exactly at `E`
-is not a decision instant); and T is not in a news blackout window. These are exactly the
-instants at which the engine asks the strategy for a signal (`Engine._step`: phase OPEN and a
-close of the decision timeframe), minus blackout instants.
+timeframe; `session_at(T)` is `s` with entries allowed; `A + 60 min < T ≤ E − 15 min`, the
+only instants at which a setup can be active (sections 5 and 6.2); and T is not in a news
+blackout window. The engine asks the strategy at every OPEN close of the decision timeframe
+(`Engine._step`); at any other of those calls the strategy returns nothing and counts
+nothing. In particular `T = A`, where `B(A)` is empty and `TWV` cannot exist, is not a
+decision instant. No trade changes: outside this range trigger rule 2 cannot hold.
 
 Times with today's `sessions.yaml` (London wall clock; New York = London − 5 h in normal
 weeks, − 4 h in mismatch weeks; UTC = London in UK winter, London − 1 h in UK summer):
@@ -367,8 +378,9 @@ overlap accumulation period or before the session; the FOMC window (13:30–15:0
 3. Not broken.
 4. Rejection.
 5. Room to the mean.
-6. **Read set complete:** every M5 slot and every M15 slot in `[A, T)` has a bar, `p`
-   exists, and `TWV(T)` exists.
+6. **Read set complete:** every M5 slot and every M15 slot with `open_time ≥ A` and
+   `close_time ≤ T` has a bar, `p` exists, and `TWV(T)` exists. At an m5 instant that is
+   not an M15 close, the M15 slot containing T is not yet complete and is not in the set.
 
 - For m15 the decision instants of a setup are `Ts + 15` and `Ts + 30`; for m5,
   `Ts + 5 … Ts + 30` (six), minus blackout instants.
@@ -426,7 +438,7 @@ strategy is called; only while the session-date is unspent unless stated):
 | `setups` | setup bar (section 5), by side, counted at its close, whether or not it is later triggered |
 | `setups_replaced` | active setup replaced by a newer one |
 | `setups_broken` | active setup broken before any trigger |
-| `setups_expired` | setup that reached `Ts + 30` without trigger or break |
+| `setups_expired` | setup still active at `Ts + 30` that was neither triggered nor broken (a replaced setup is not counted) |
 | `ambiguous_setup` | bar meeting both the long and the short side rules |
 | `setup_regime_off` | bar meeting setup rules 1 and 3–6 but not 2 |
 | `data_gap` | instant meeting trigger rule 1 whose read set is incomplete |
@@ -437,9 +449,14 @@ strategy is called; only while the session-date is unspent unless stated):
 | `stop_above_cap` | spend whose `d_S` exceeds 2,000 (section 8a) — at the spend |
 | `reward_risk_below_min` | spend with `d_T < d_S` (section 9) — at the spend |
 
-**Session-date status** (exactly one): `signal`, `stop_below_minimum`, `stop_above_cap`,
-`reward_risk_below_min`, `no_trigger` (complete session, no spend), `data_gap` (read set
-incomplete before any spend), `twv_undefined`, or `no_decision_time`.
+**Session-date status** (exactly one, the first that applies):
+
+1. spent: `signal`, `stop_below_minimum`, `stop_above_cap` or `reward_risk_below_min`, from
+   the spend (section 6.3);
+2. `no_decision_time`: the session-date has no decision instant (section 6.1);
+3. `data_gap`: at some decision instant the read set of trigger rule 6 was incomplete;
+4. `twv_undefined`: at some decision instant the read set was complete and `Σ w_i = 0`;
+5. `no_trigger`: otherwise.
 
 **Engine-side outcomes** (from the journal, reported per variant, not strategy state): signals,
 risk rejections by reason, broker rejections, unknown outcomes, fills.
@@ -481,8 +498,13 @@ is spent, `stop_below_minimum` +1. The stop is never widened to reach the minimu
   4 hours. At `s` = 500 points: 0.11% of level exits on bar-only days 2020-11 … 2026-06, 0.5%
   on the 2026 bar days, 0.1% on exact tick days; at 300 points: 0.39%, 2.9% and 1.0%. On the
   exact days, ticks showed the stop really came first in about 70% of the ambiguous cases.
-  The report's policy: open Phase 3b only if a candidate's `worst_case_share` exceeds 1% or
-  best-case scoring changes its net expectancy by more than 10% (now gate 11).
+  The report proposed opening Phase 3b if a candidate's share exceeded 1% or best-case
+  scoring changed its net expectancy by more than 10%. That proposal was superseded. The
+  registered rule (ADR-0009 §9, `aurum.validation.phase3b`; gate 11) is
+  `phase_3b_required = worst_case_share > 1% or sign(net_worst) != sign(net_best) or
+  verdict_worst != verdict_best`, with `worst_case_share` = flagged ÷ total closed trades of
+  the worst-case run (strictly greater than 1%), net P&L rounded to cents (0.00 its own sign),
+  the best case a separate linked deterministic replay, and no override.
 - **What the 500 minimum is:** an engineering policy that keeps this family's stops in the
   range where that measurement found the share small. It is a measurement constraint, not an
   economic one.
@@ -502,7 +524,7 @@ is spent, `stop_below_minimum` +1. The stop is never widened to reach the minimu
 
 Inputs as recorded in opening_range_breakout section 8a (same pinned snapshot,
 `20261010T000046Z.json`, sha256 `0426cf8c…be0c7ee`). **They must be re-read from the pinned
-snapshot at freeze;** the snapshot was not opened for this draft.
+snapshot at freeze (B2, section 18b);** the snapshot was not opened for this draft.
 
 | Input | Value | Source |
 |---|---|---|
@@ -572,9 +594,10 @@ London:
 | March mismatch (US summer, UK winter) | 12:15 | 12:30 | 15 min | 17:45 | 14:00 | 18:00 | 15 min | 20:00 |
 | Oct/Nov mismatch (US summer, UK winter) | 12:15 | 12:30 | 15 min | 17:45 | 14:00 | 18:00 | 15 min | 20:00 |
 
-FOMC statements fall in mismatch weeks in the development period, for example 2021-03-17,
-2021-11-03, 2022-03-16, 2022-11-02, 2023-03-22, 2023-11-01, 2024-03-20 and 2025-03-19
-(`risk.yaml` dates; DST rules as above). There the statement is at 18:00 London.
+In the evaluated period (2020-12-15 … 2025-09-30) FOMC statements fall in mismatch weeks on
+exactly these eight dates, the complete list: 2021-03-17, 2021-11-03, 2022-03-16,
+2022-11-02, 2023-03-22, 2023-11-01, 2024-03-20 and 2025-03-19 (`risk.yaml` dates; DST rules
+as above). There the statement is at 18:00 London.
 
 Revision 1 used the latest m5 decisions 10:55 and 16:25, giving deadlines 12:25 and 17:55:
 also before 12:30 and 18:00, with a 5-minute margin, and m15 and m5 had different latest
@@ -607,7 +630,11 @@ decisions. Revision 2's setup window (V13) moves both to 10:45 and 16:15.
 None is used to justify removing another. On early-close dates force-flat can come first: in
 the evaluated period, the cutoff is 17:31 London on 2021-05-31 and 2021-07-05 (12:46 New
 York closes) and 17:45 London on 2021-09-06 and 2025-07-04 (13:00 New York closes), computed
-from `configs/data.yaml`, not from bars.
+from `configs/data.yaml`, not from bars. These four are the complete list of evaluated dates
+with a cutoff at or before 17:45 London; the next earliest are 17:46 (2021-02-15,
+2021-11-25) and 17:50 (2021-01-18). The risk engine's 45-minute entry cutoff therefore never
+binds in the evaluated period: the earliest cutoff, 17:31, stops entries at 16:46, after the
+latest decision instant (16:15).
 
 - **Disclosure:** the author knows that most ORB exits were timeouts. 90 is set by the
   calendar bounds above, not by those results; the knowledge is still listed in section 18.
@@ -699,7 +726,8 @@ A signal that passes 13.1 becomes an order only if, at T:
   sized volume ≥ 0.01 lot with the sizing distance of section 8a;
 - no earlier order outcome is unresolved;
 - the broker accepts: a quote within 60 s of `T + 200 ms`, and the stop and target at least
-  `trade_stops_level` from the fill-side quote.
+  `trade_stops_level` from the closing-side quote: the bid for a long, the ask for a short
+  (MT5 rule; `aurum.backtest.broker.SimBroker._stops_vs_quote`).
 
 Executable distances (long, spread `s` at the fill, 5 points slippage): entry ≈ `ref + s + 5`,
 so risk to the stop ≈ `d_S + s + 5` (+ 5 stop slippage) and reward to the target
@@ -798,7 +826,17 @@ meet 13.1 and 13.2 together.
 
 Carried forward unchanged from opening_range_breakout 0.1.0 section 16 (itself trend_pullback
 A1's), with only the grid names changed. Gate 8 applies as written: both sides are defined
-(table 5a).
+(table 5a). **Where this section is silent, the frozen ORB 0.1.0 section 16 text applies
+verbatim** (with this family's parameter names). In particular these five details are
+preserved:
+
+- no point with ≥ 100 trades over the whole development period → no frozen configuration,
+  and the variant cannot go to Phase 6;
+- a neighbour with no trade in folds 1–4 has no net expectancy and counts as not > 0
+  (gate 10);
+- gate 7 removes all trades of the calendar month (UTC, by entry) with the largest net P&L;
+- gate 5's ×2.0 spread re-run is reported, not gated;
+- if both variants pass every gate, both go to Phase 6.
 
 - **Periods and sealing:** development data 2020-11-12 … 2025-09-30; sealed 2025-10-01 …
   2026-10-08, refused by the loader before reading, opened once only for a frozen, approved
@@ -970,8 +1008,11 @@ Date: a UK-summer trading date (normal week), `ldn_ny_overlap`, `A` = 13:00 Lond
   days 2026-06-26 … 10-08) were measured before the sealed period was defined (2026-10-10)
   and lie wholly or partly inside it. They are cost and fill-structure figures, not P&L, and
   the same figures already set `max_spread_points` and `bar_spread_extra_points`. V5 (buffer
-  25) and V6 (minimum 500) cite them. Using them is a disclosed exception, not an inspection
-  of the sealed period for this family.
+  25) and V6 (minimum 500) cite them; so do the cost illustration of section 13.3 (median
+  spread 6 → zero-edge cost ≈ 18 points, 0.8–4.1%, the break-even rates and the 1.8-point
+  hurdle given as V8's reason, also in section 2) and, qualitatively, the release spread
+  spikes of sections 3.1 and 18. No rule value depends on the section 13.3 figures. Using
+  them is a disclosed exception, not an inspection of the sealed period for this family.
 - **Choices those results could have influenced, and how they were made:**
   - **Fading moves at all.** The planned family predates every result, but two momentum
     families losing makes reversion look attractive after the fact. A reversion family is
@@ -1040,6 +1081,10 @@ rule, cases go in tables or hypothesis properties inside a few tests, not one te
       closing at a blackout instant; replacement only by a setup; missing `p`.
 - [ ] Mirror property (hypothesis): reflecting all prices about a constant swaps long and
       short decisions, levels and statuses exactly (with the rounding directions of 5a).
+      float64 reflection is not exact in general (typical prices divide by 3, TWV and ATR
+      divide), so the property either uses inputs whose reflected derived values are exactly
+      representable, or discards generated cases with any comparison at or within float
+      tolerance of equality. Equality boundaries stay covered by the explicit boundary tests.
 - [ ] Spend and one use; spent on a geometry failure; a missed or late call after the spend
       returns nothing; restart before and after the spend (stateless re-walk).
 - [ ] Stop/target rounding (float noise, off-grid); `d_S` 499/500/2,000/2,001 and the
@@ -1060,7 +1105,7 @@ rule, cases go in tables or hypothesis properties inside a few tests, not one te
 
 **Data and environment (each needs its own approval, section 18b):**
 
-- [ ] Section 8a re-read from the pinned snapshot.
+- [ ] Section 8a re-read from the pinned snapshot (at B2).
 - [ ] Real-data trace on development bars (no P&L, no ledger).
 - [ ] Dry `prepare` of both variants: contexts differ only by `variant`.
 - [ ] Ledger integrity check and a pre-run backup; collector state recorded.
@@ -1079,9 +1124,9 @@ Claude stops at each boundary; one approval never covers the next.
 
 | # | Step | Needs | Reads market data? |
 |---|---|---|---|
-| B0 | Review of this draft; decisions V1–V17 | owner | no |
+| B0 | Review of this draft; decisions V1–V17 (**decided 2026-10-11**: all accepted, V17 explicitly) | owner | no |
 | B1 | Feasibility diagnostics (optional): descriptive counts on development bars ≤ 2025-09-30, no fill, exit or P&L; any rule change after them is listed as data-informed | separate approval | yes, development only |
-| B2 | Freeze 0.1.0 | owner | no |
+| B2 | Pinned-snapshot read, then freeze 0.1.0: the file's sha256 is checked against `backtest.yaml` `symbol_snapshot`; only the section 8a inputs and `trade_stops_level` are read; they are recorded in section 8a before the freeze | owner; the snapshot read needs the owner's explicit authorisation | pinned symbol snapshot only, no market data |
 | B3 | Implementation and deterministic tests (synthetic data only) | separate approval | no |
 | B4 | Real-data trace check (no P&L, no ledger) | separate approval | yes, development only |
 | B5 | Prerequisites: tester-parity decision (complete it, or proceed without it with the reason recorded); analysis script committed and tested; ledger backup | owner | no |
@@ -1096,3 +1141,4 @@ Claude stops at each boundary; one approval never covers the next.
 |---|---|---|---|
 | 0.1.0 (draft) | 2026-10-11 | Initial draft: tick-weighted session mean (VWAP proxy), H1 efficiency-ratio regime, M15 setup at a new session extreme ≥ `k_dev` ATR from the mean, rejection trigger on M15 or M5 bars, stop 25 points beyond the extreme within 500–2,000 points, target at the mean with `d_T ≥ d_S`, 90-minute timeout, one use per session-date, 12-trial grid, gates carried forward from ORB 0.1.0, cumulative N = 66 + n, proposed Phase 5 stop rule. Decisions V1–V15 open. No data read | Owner authorised a documentation-only draft (2026-10-11) after rejecting opening_range_breakout 0.1.0 |
 | 0.1.0 (draft, rev. 2) | 2026-10-11 | Short rules written out (table 5a; V16). Setup window `Ts ≤ E − 45` (V13): same setups and latest decision `E − 15` in both variants. Exact decision-instant, blackout and deadline tables (6.1, 10.2); explicit hold bounds 12:15 / 17:45 London with a construction-time check (V9); the timeout claim corrected from "closes" to "requests a close". Causal rules made explicit: TWV bars per rule, target fixed at T, setup life cycle, spend after risk or broker rejection (6.2, 6.3). Variant differences stated (6.4). Geometry split into necessary / executable / cost (13); the 9.75 USD derivation written out; the double-counted short spread removed (costs 0.8–4.1%, not 0.8–5.4%); break-even rates recomputed. Long sizing distance includes the spread (8a floors 8,038–8,118). Intra-bar evidence and its limits (8.2); statistics from dates now sealed disclosed (V17). Short synthetic trace. No data read | Owner's B0 review (2026-10-11) |
+| 0.1.0 (draft, rev. 3) | 2026-10-11 | B0 corrections, documentation only. Decision instants defined as `A + 60 min < T ≤ E − 15 min`; other OPEN calls return and count nothing (fixes `twv_undefined` at `T = A`). Session-date statuses given an explicit precedence (6.5). V17 disclosure completed (V5, V6, the 13.3 cost illustration behind V8, section 2, the release-spike remarks). B2 made an explicitly authorised, hash-checked pinned-snapshot read of the 8a inputs and `trade_stops_level` only, recorded before freezing. Wording: closing-side stops-level quote (13.2); the exact ADR-0009 §9 gate-11 rule (8.2); `atr_period` source (3.2); M15 slot completeness at non-M15 instants; ORB §16 applies verbatim where section 16 is silent, five details restated; MASTER_PROMPT paraphrase labelled; `setups_expired` excludes replaced setups; clipped session ends; complete FOMC-mismatch and early-cutoff lists, 45-minute cutoff never binding; mirror-property test constraint (18a). B0 decision recorded (V1–V17 accepted). **No trading rule changed; no market data, ledger or snapshot was read.** Audit and patch: `docs/strategies/evidence/vwap_reversion_2026-10-11_b0_audit.{md,patch}` | Owner accepted the B0 audit (2026-10-11) |
