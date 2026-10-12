@@ -708,6 +708,19 @@ failed".
   - **Live work this week (owner, 2026-10-12):** the collector and data-quality checks of the
     collected ticks only. No strategy is authorised: none is built, implemented, registered,
     backtested or run live.
+  - **First data-quality checks (2026-10-12),** read-only, dates ≥ 2026-10-09 only:
+    `docs/data_quality/2026-10-12_collected_ticks.md`, script
+    `scripts/collected_ticks_check.py`.
+    - `aurum data qa --from 2026-10-09` was **not run**: it reads the 2026-10-08 canonical
+      M1 and normalized ticks and the whole fidelity manifest, so it breaches the date limit.
+    - One-day history backfill (2026-10-09, ticks only, 230,284 rows): history holds every
+      collected row plus 13 more.
+    - Spreads: median 6–7 points, p90 10–11, p99 13–20 by session. 0.04–0.98% of ticks are
+      over the 20-point cap.
+    - Journal: 20 VM pauses (46,882 s) and 0 gaps.
+- **Queue B decision (owner, 2026-10-12):** the collector stays on the dev venv this week.
+  The release venv is planned for a later deliberate stop and restart, together with the
+  logon task from VM_SETUP §13. The owner runs any registration commands.
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
