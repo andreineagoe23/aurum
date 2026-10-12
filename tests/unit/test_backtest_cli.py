@@ -13,15 +13,16 @@ from typing import Any
 
 import polars as pl
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from aurum.adapters.storage.layout import DataLayout, RunLayout, ledger_path
-from aurum.backtest import pipeline
+from aurum.backtest import pipeline, sealed
 from aurum.backtest.loading import load_market, merge_history
 from aurum.backtest.runner import BacktestResult, EquityPoint
 from aurum.backtest.storage import new_run_id, read_manifest, read_trades
 from aurum.cli import app
-from aurum.core.clock import SystemClock
+from aurum.core.clock import ManualClock, SystemClock
 from aurum.core.errors import ConfigError, LedgerError, SealedPeriodError
 from aurum.core.timeframes import Timeframe
 from aurum.execution.engine import HISTORY_BARS
@@ -165,7 +166,15 @@ def test_research_seal_is_refused_then_opened_once_and_journalled(
     shutil.copytree(research_store, data)
     monkeypatch.setenv("AURUM_DATA_DIR", str(data))
     monkeypatch.setenv("AURUM_RUNS_DIR", str(runs))
-    use_configs(tmp_path, repo_root, monkeypatch, {"first": "2025-09-09", "last": "2025-09-30"})
+    configs = use_configs(
+        tmp_path, repo_root, monkeypatch, {"first": "2025-09-09", "last": "2025-09-30"}
+    )
+    # Only this private synthetic fixture is frozen; the repository's rejected disposition
+    # is never changed to exercise the allowed one-time-opening path.
+    path = configs / "strategies" / "trend_pullback.yaml"
+    cfg = yaml.safe_load(path.read_text())
+    cfg["status"] = "frozen"
+    path.write_text(yaml.safe_dump(cfg))
     base = ["backtest", "run", "trend_pullback", "--from", "2025-09-08", "--to"]
 
     refused = runner.invoke(app, [*base, "2025-09-09"])
@@ -209,6 +218,108 @@ def test_research_seal_is_refused_then_opened_once_and_journalled(
         "frozen",
     )
     assert [t.sealed_test_opened for t in trials] == [False, True]
+
+
+def test_unfrozen_sealed_openings_are_refused_before_data_or_ledger_access(
+    tmp_path: Path, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """G-B: spec/enabled cannot bypass disposition, including direct guard callers."""
+    configs = use_configs(
+        tmp_path, repo_root, monkeypatch, {"first": "2030-01-07", "last": "2030-12-31"}
+    )
+    data, runs = tmp_path / "empty-data", tmp_path / "runs"
+    monkeypatch.setenv("AURUM_DATA_DIR", str(data))
+    monkeypatch.setenv("AURUM_RUNS_DIR", str(runs))
+
+    def forbidden(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("ineligible opening reached a snapshot, market-data or ledger boundary")
+
+    monkeypatch.setattr(pipeline, "pinned_spec", forbidden)
+    monkeypatch.setattr(pipeline, "plan_market", forbidden)
+    monkeypatch.setattr(pipeline, "read_market", forbidden)
+    monkeypatch.setattr(pipeline, "TrialLedger", forbidden)
+    monkeypatch.setattr(sealed, "TrialLedger", forbidden)
+    clock = ManualClock(datetime(2030, 1, 7, tzinfo=UTC))
+    path = configs / "strategies" / "trend_pullback.yaml"
+    original = yaml.safe_load(path.read_text())
+    cases = [
+        ("trend_pullback", {}, "status 'rejected'"),
+        ("opening_range_breakout", {}, "status 'rejected'"),
+        ("vwap_reversion", {}, "status 'rejected'"),
+        ("trend_pullback", {"enabled": True}, "status 'rejected'"),
+        ("trend_pullback", {"status": "draft"}, "status 'draft'"),
+        ("trend_pullback", {"status": None}, "status 'draft'"),  # omit the field
+        ("trend_pullback", {"status": "frozen", "spec": None}, "no approved spec"),
+    ]
+    for name, changes, match in cases:
+        cfg = original | changes
+        if cfg.get("status") is None:
+            cfg.pop("status")
+        path.write_text(yaml.safe_dump(cfg))
+        settings = load_settings(repo_root)
+        for variant in ("m15", "m5"):
+            request = pipeline.RunRequest(
+                name,
+                variant,
+                date(2030, 1, 7),
+                date(2030, 1, 8),
+                open_sealed=True,
+                opened_by="synthetic-test",
+                open_reason="G-B regression",
+            )
+            with pytest.raises(SealedPeriodError, match=match):
+                sealed.resolve_access(
+                    settings.config,
+                    request,
+                    ledger_file=ledger_path(data),
+                    config_hash="synthetic",
+                    code_version=None,
+                    clock=clock,
+                )
+            result = runner.invoke(
+                app,
+                [
+                    "backtest",
+                    "run",
+                    name,
+                    "--variant",
+                    variant,
+                    "--from",
+                    "2030-01-07",
+                    "--to",
+                    "2030-01-08",
+                    "--open-sealed",
+                    "--by",
+                    "synthetic-test",
+                    "--reason",
+                    "G-B regression",
+                ],
+            )
+            assert result.exit_code == 1, (name, changes, variant, result.output)
+            assert match in flat(result.output), (name, changes, variant, result.output)
+            assert not data.exists()  # no snapshot, market file, journal or ledger was opened
+            assert not runs.exists()
+
+    # Combining the two modes is refused before the snapshot too, not a preflight bypass.
+    for name in ("trend_pullback", "reference_fixed_time"):
+        result = runner.invoke(
+            app,
+            [
+                "backtest", "run", name, "--variant", "m5",
+                "--from", "2030-01-07", "--to", "2030-01-08",
+                "--open-sealed", "--parity",
+            ],
+        )  # fmt: skip
+        assert result.exit_code == 1
+        assert "--parity and --open-sealed are separate paths; use one" in flat(result.output)
+        assert not data.exists()
+        assert not runs.exists()
+    # A reference strategy cannot become a research candidate through its status field.
+    reference = settings.config.strategies["reference_fixed_time"]
+    for status in ("draft", "frozen", "rejected"):
+        strategy = reference.model_copy(update={"status": status})
+        with pytest.raises(SealedPeriodError, match="opened only for research strategies"):
+            sealed.check_opening_status(strategy)
 
 
 def test_warmup_is_loaded_by_bar_count(tmp_path: Path) -> None:

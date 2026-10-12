@@ -52,6 +52,10 @@ def test_repo_configs_are_valid(app_config: AppConfig) -> None:
         "reference_fixed_time",
     }
     assert app_config.strategies["reference_fixed_time"].family == "reference"
+    assert app_config.strategies["reference_fixed_time"].status == "draft"
+    assert all(
+        s.status == "rejected" for s in app_config.strategies.values() if s.family != "reference"
+    )
     assert app_config.backtest.bar_spread_extra_points == 2
     assert app_config.backtest.latency_ms == 200
     sealed = app_config.backtest.sealed_period
@@ -176,11 +180,21 @@ def test_strategy_config_errors(config_dir: Path) -> None:
         ({"enabled": True}, "without a spec"),
         ({"sessions": ["tokyo"]}, "unknown sessions"),
         ({"name": "other_name"}, "declares name"),
+        ({"status": "approved"}, "status"),
+        ({"status": None}, "status"),
     ]:
         path.write_text(original)
         edit(config_dir, "strategies/vwap_reversion", **changes)
         with pytest.raises(ConfigError, match=match):
             load_config(config_dir)
+    for status in ("draft", "frozen", "rejected"):
+        path.write_text(original)
+        edit(config_dir, "strategies/vwap_reversion", status=status)
+        assert load_config(config_dir).strategies["vwap_reversion"].status == status
+    raw = yaml.safe_load(original)
+    raw.pop("status")
+    path.write_text(yaml.safe_dump(raw))
+    assert load_config(config_dir).strategies["vwap_reversion"].status == "draft"
 
 
 def test_missing_file_and_bad_yaml(config_dir: Path) -> None:

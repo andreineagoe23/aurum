@@ -1,6 +1,7 @@
-# Phase 5. Parameters are filled in only after the spec document exists.
+# Phase 5: rejected at B1 on 2026-10-11. Draft revision 4 was never frozen or implemented.
 name: vwap_reversion
 family: vwap_reversion
+status: rejected
 enabled: false
 variants: [m15, m5]
 sessions: [london_morning, ldn_ny_overlap]

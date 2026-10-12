@@ -72,6 +72,14 @@ the broker first processes quotes before `t`, then the engine decides on bars cl
 one transaction → renamed to `reports/runs/<run_id>/`. A failed publish leaves the trial and the
 staged files (`aurum backtest recover`). Reruns must be byte-identical (`aurum backtest compare`).
 
+**G-B lifecycle guard:** `StrategyConfig.status` is `draft | frozen | rejected`, defaulting to
+`draft`. Research `--open-sealed` requires `frozen` and a spec path; `prepare` checks before
+reading the pinned snapshot and `sealed.resolve_access` checks again before any opening
+journal is accessed. All three rejected research configs carry `status: rejected`. The
+reference parity exemption is unchanged and separate; a frozen status is not permission to
+run parity, backtests or trials. Ordinary development/grid requests are unchanged: the
+broader grid ban in the process-lessons proposal has not been adopted.
+
 **Data** (Phase 2): `aurum data backfill` (raw ticks/bars, immutable) and `aurum data collect`
 (live ticks) → `aurum data resample` (normalized ticks, canonical bars; ticks used only on days
 whose tick-built M1 equals the broker's) → `aurum data qa --strict` (0 unexplained gaps) →

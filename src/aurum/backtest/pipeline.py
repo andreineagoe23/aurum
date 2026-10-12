@@ -40,10 +40,15 @@ from aurum.backtest.accounting import equity_frame, journal_frame, summarize, tr
 from aurum.backtest.broker import SimBroker, SimCosts
 from aurum.backtest.loading import MarketPlan, merge_history, plan_market, read_market
 from aurum.backtest.runner import run_backtest
-from aurum.backtest.sealed import SealedAccess, resolve_access
+from aurum.backtest.sealed import SealedAccess, check_opening_status, resolve_access
 from aurum.backtest.storage import new_run_id, publish_run, stage_run
 from aurum.core.clock import ManualClock
-from aurum.core.errors import ArtifactsPendingError, ConfigError, EvaluationFailedError
+from aurum.core.errors import (
+    ArtifactsPendingError,
+    ConfigError,
+    EvaluationFailedError,
+    SealedPeriodError,
+)
 from aurum.core.timeframes import Timeframe
 from aurum.data.market_hours import MarketHours
 from aurum.execution.engine import HISTORY_BARS, Engine
@@ -182,6 +187,12 @@ def prepare(settings: Settings, request: RunRequest, *, clock: ClockPort) -> Pre
         raise ConfigError("commission currency differs from the account currency")
     if (request.grid_id or request.retry_of) and (request.open_sealed or request.parity):
         raise ConfigError("grid points and retries are ordinary evaluations, never sealed/parity")
+    if request.open_sealed:
+        if request.parity:
+            raise SealedPeriodError("--parity and --open-sealed are separate paths; use one")
+        # G-B refuses rejected/draft candidates before even reading the pinned snapshot.
+        # resolve_access repeats the check for callers outside this pipeline.
+        check_opening_status(cfg.strategies[request.strategy])
     bt = cfg.backtest
     pin = bt.symbol_snapshot
     snapshot = pinned_spec(settings.data_dir, pin.file, pin.sha256)

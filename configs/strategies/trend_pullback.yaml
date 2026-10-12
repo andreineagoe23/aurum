@@ -4,6 +4,7 @@
 # target_r {1.0, 1.5, 2.0}, per variant: 54 trials. The values below are the spec's defaults.
 name: trend_pullback
 family: trend_pullback
+status: rejected  # Owner rejection 2026-10-11; the frozen spec remains historical evidence.
 enabled: false
 variants: [m15, m5]
 sessions: [london_morning, ldn_ny_overlap]

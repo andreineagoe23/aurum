@@ -9,8 +9,9 @@ No backtest reads data dated inside ``backtest.sealed_period``:
 There are exactly two journalled ways in. Both are recorded in the trial ledger **before** any
 data is read, so a crash still counts.
 
-* **Opening** (``open_sealed`` with who and why): for a research strategy with an approved spec
-  (``spec:`` set), once per strategy and variant (``sealed_openings``, UNIQUE).
+* **Opening** (``open_sealed`` with who and why): for a research strategy with an explicit
+  ``status: frozen`` and a spec path, once per strategy and variant (``sealed_openings``,
+  UNIQUE). G-B checks eligibility before snapshot/data reads and again before journalling.
 * **Parity** (``parity``): the MT5 Strategy Tester comparison of the one strategy and variant
   named in ``sealed_period.parity_exemption``, with trading dates inside its window, in the
   tester context (fixed volume, zero latency, zero slippage) and with no calendar warm-up. The
@@ -26,7 +27,7 @@ from typing import Protocol
 from aurum.core.errors import SealedPeriodError
 from aurum.ledger.trial_ledger import TrialLedger
 from aurum.ports.clock import ClockPort
-from aurum.settings import AppConfig
+from aurum.settings import AppConfig, StrategyConfig
 
 DAY = timedelta(days=1)
 
@@ -74,6 +75,29 @@ def _last_day_outside(last: date, forbidden: tuple[tuple[date, date], ...]) -> d
     return last if any(lo <= nxt <= hi for lo, hi in forbidden) else None
 
 
+def check_opening_status(strategy: StrategyConfig) -> None:
+    """G-B: refuse ineligible research openings without reading data or opening a ledger.
+
+    This is not approval to run a backtest and does not change the separate parity path.
+    Called both at pipeline preflight (before the pinned snapshot) and by resolve_access.
+    """
+    if strategy.family == "reference":
+        raise SealedPeriodError(
+            "the sealed period is opened only for research strategies; the reference "
+            "strategy uses --parity inside its approved window"
+        )
+    if strategy.status != "frozen":
+        raise SealedPeriodError(
+            f"{strategy.name} has status {strategy.status!r}; "
+            "--open-sealed requires status: frozen, not merely a spec path or enabled flag"
+        )
+    if not strategy.spec:
+        raise SealedPeriodError(
+            f"{strategy.name} has no approved spec (spec: in its config); "
+            "the sealed period is opened only for a frozen candidate"
+        )
+
+
 def resolve_access(
     cfg: AppConfig,
     request: SealedRequest,
@@ -106,21 +130,11 @@ def resolve_access(
             opened=False,
             parity=False,
         )
-    strategy = cfg.strategies[request.strategy]
-    if strategy.family == "reference":
-        raise SealedPeriodError(
-            "the sealed period is opened only for research strategies; the reference "
-            "strategy uses --parity inside its approved window"
-        )
+    check_opening_status(cfg.strategies[request.strategy])
     if not overlaps:
         raise SealedPeriodError(
             f"--open-sealed, but {asked} does not overlap {span}; "
             "refusing to spend the one-time opening"
-        )
-    if not strategy.spec:
-        raise SealedPeriodError(
-            f"{request.strategy} has no approved spec (spec: in its config); "
-            "the sealed period is opened only for a frozen candidate"
         )
     with TrialLedger(ledger_file, clock=clock) as ledger:
         ledger.record_sealed_opening(

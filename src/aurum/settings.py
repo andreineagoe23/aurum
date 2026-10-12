@@ -456,6 +456,9 @@ class StrategyConfig(_Config):
     name: str = Field(pattern=r"^[a-z0-9_]+$")
     family: StrategyFamily
     """``reference`` is the Phase 3 simulator check, not a research strategy."""
+    status: Literal["draft", "frozen", "rejected"] = "draft"
+    """Lifecycle disposition (G-B). Missing status fails closed for sealed openings;
+    a spec path or enabled flag alone is never a frozen-candidate approval."""
     enabled: bool = False
     variants: list[Literal["m15", "m5"]] = Field(min_length=1)
     sessions: list[str] = Field(min_length=1)

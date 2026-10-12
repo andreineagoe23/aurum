@@ -94,7 +94,13 @@ Owner decision D1, 2026-10-10; implemented in `aurum.backtest.sealed` and
     warm-up history and the extra end day;
   - a run ending just before it loads data only up to the day before it.
 - **Opening:** `aurum backtest run … --open-sealed --by NAME --reason TEXT`, only for a
-  research strategy whose config has an approved `spec:`.
+  research strategy whose config has explicit `status: frozen` and an approved `spec:`.
+  - G-B (owner-authorised implementation, 2026-10-12): `draft` (the default if omitted) and
+    `rejected` are refused before the pinned snapshot is read; the access resolver repeats
+    the eligibility check before journal access. Unknown or null statuses fail config
+    validation. `enabled: true` and the presence of `spec:` do not bypass disposition.
+  - This guard does not authorise any run, change a verdict, or block ordinary development
+    grids. The wider grid restriction in the process-lessons proposal remains unadopted.
   - It is journalled in the trial ledger (`sealed_openings`, append-only) **before** any data
     is read, so a crash still counts.
   - It is allowed **once per strategy and variant** (UNIQUE), and the trial row gets

@@ -1,10 +1,11 @@
 # Phase 5 family 2. Spec: docs/strategies/opening_range_breakout.md, 0.1.0, frozen 2026-10-11
-# (implementation and deterministic tests only; no trial authorised yet). Fixed rules are code
+# (subsequently rejected under section 16 on 2026-10-11). Fixed rules are code
 # constants (aurum.strategies.opening_range_breakout); only the declared grid is searched:
 # or_bars {2, 4} x target_r {1.0, 1.5, 2.0}, per variant: 12 trials. The values below are the
 # spec's defaults.
 name: opening_range_breakout
 family: opening_range_breakout
+status: rejected
 enabled: false
 variants: [m15, m5]
 sessions: [london_morning, ldn_ny_overlap]
