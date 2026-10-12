@@ -134,7 +134,7 @@ changes them.
   selected **"G-B plus research proposal"** after review of the limited scope. This replaces
   only G-B's deferral and permits public-evidence research/proposal work, not a new family,
   strategy implementation, a protocol change or proposal adoption.
-  - **Implemented locally, not pushed or deployed:** validated `StrategyConfig.status`
+  - **Implemented; delivered to GitHub, not deployed to the VM:** validated `StrategyConfig.status`
     (`draft | frozen | rejected`, missing defaults to `draft`); all three research configs
     marked `rejected`. `--open-sealed` requires a research family, `frozen` status and a
     spec path. `prepare` refuses ineligible openings before the pinned snapshot read;
@@ -144,6 +144,14 @@ changes them.
     status and combined opening/parity flags. Existing config and one-time-opening tests
     extended; the allowed opening uses only a private frozen synthetic fixture.
     The real tester-parity task is not run or closed.
+  - **Delivery and main-only workflow (2026-10-12):** the owner separately approved
+    "Push branch only"; `d1130ee592e54cbc6b915b3379149202f92593db` and
+    `6f3ccd5751f01d64d425c13754dfcaa5827e9365` were delivered to
+    `origin/fix/gb-seal-guard`, with `origin/main` still at `d570119` at that delivery.
+    The owner subsequently directed **all further work onto `main`**. The same two
+    commits were fast-forwarded onto `main` in Computer's isolated checkout, without
+    rewriting them. Further commits are made on `main`; each remote push still needs
+    approval. This is not permission to pull into the collector's active VM checkout.
   - **Scope limits:** the process-lessons proposal's ordinary-grid ban is not adopted or
     implemented. Reference parity semantics, trading rules, risk, registry, strategy specs,
     real data, production ledger and sealed period are unchanged. G-B is a config-based
@@ -156,7 +164,9 @@ changes them.
     **PROPOSAL, NOT ADOPTED**. The requested 70–75% win rate is an aspiration, not a verified
     result or replacement for the net-expectancy/drawdown gates. Both proposals remain
     subject to separate item-by-item decisions.
-  - **Still required:** owner review and separate push/deployment approval; G-B must be
+  - **Still required:** Windows synthetic verification remains proposed, not run or approved
+    by the main-only instruction. Actual tester parity remains deferred. Owner acceptance
+    and separate deployment approval are required; G-B must be
     available in the intended run environment before any parity, sealed-opening or backtest
     authorisation. All run/data-read approvals remain separate. S3 (review 2026-12-15),
     collector/release-venv/logon, S2a/S2b, VM_SETUP and CRLF work remain untouched.

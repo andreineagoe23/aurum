@@ -1,7 +1,8 @@
 # Aurum G-B implementation review
 
-Date: 2026-10-12. G-B is implemented and tested in an isolated Linux checkout; it has not
-been pushed, deployed to the Windows VM, or used with real market data.
+Date: 2026-10-12. G-B is implemented and tested in an isolated Linux checkout and was
+delivered to `origin/fix/gb-seal-guard` after the owner's explicit branch-only push approval.
+It has not been deployed to the Windows VM or used with real market data.
 
 ## Authority and identity
 
@@ -9,11 +10,17 @@ been pushed, deployed to the Windows VM, or used with real market data.
   This authorises the chosen guard, synthetic regression tests, status documentation and
   a public-evidence proposal, not new strategy work or any real-data run.
 - **Base:** `d570119ca55bb1685f0c7653db577690819326e3` (`origin/main` at verification).
-- **Local branch:** `fix/gb-seal-guard`.
+- **Delivery history:** `fix/gb-seal-guard` carried the two reviewed commits; `origin/main`
+  remained at the baseline at that push. The owner subsequently directed all work onto
+  `main`; Computer fast-forwarded its isolated local `main` to the reviewed tip, without
+  changing commit identities. New work is committed on `main`; remote pushes remain
+  separately approved, and VM checkout updates are a separate deployment decision.
 - **Implementation commit:** `d1130ee592e54cbc6b915b3379149202f92593db`.
-- **Commit policy:** no trailers; no amend or rewrite of existing history. Local commits
-  use `Perplexity Computer <computer@localhost>` because this sandbox has no configured Git
-  identity; repository/global identity configuration was not changed.
+- **Original documentation/research commit:** `6f3ccd5751f01d64d425c13754dfcaa5827e9365`.
+- **Commit policy:** no trailers; no amend or rewrite of existing history. The original two
+  commits used `Perplexity Computer <computer@localhost>` because the sandbox had no
+  configured Git identity; those commits are preserved. Subsequent commits use the
+  connected GitHub account's verified login/id with repository-local Git configuration.
 
 ## Behaviour and scope
 
@@ -124,7 +131,38 @@ Phase 3 remains "done except tester parity"; Phase 5 remains closed, all three f
 rejected, with no deployable strategy and N = 66. No fourth family, rescue revision, ML,
 real-data backtest, parity run, reserve processing or deployment is authorised.
 
-Next: owner review, then separate approval to push the local branch and any later deployment.
+Next: owner review, separate approval for each push to `main`, and any later deployment.
 The owner can delegate the outstanding MT5 tester-parity work to Claude on the Windows VM,
 but that requires an exact run/data-read plan and its own approval; passing these synthetic
 tests does not close it.
+
+## Windows follow-up review
+
+The owner supplied Claude's VM inspection and a proposed isolated Windows test plan.
+Those observations are attributed to that VM reviewer; Computer has not inspected VM
+files, run Windows tests, or accessed MT5.
+
+- **Request A:** recommend a separate checkout and venv of the accepted `main` commit,
+  with empty test data and all MT5/order tests excluded. The process must override the
+  inherited `UV_PROJECT_ENVIRONMENT`, clear inherited Aurum/MT5 settings (including
+  `AURUM_CONFIG_DIR`), then set only the intended test settings. These are process-local
+  changes, not changes to user/machine environment variables or the collector.
+- **Fail-fast execution:** the supplied semicolon-separated PowerShell native commands
+  need explicit exit-code checks; a printed import path must also be an enforced assertion.
+  Stop on the first clone, environment, interpreter, import, lint, type or test failure;
+  never fall back to the collector's dev venv.
+- **Request B:** still deferred. A successful Windows synthetic run does not authorise
+  the tester, historical-run artefact reads, history downloads, heartbeat reads, account
+  selection, or a phase-gate update.
+- **Tester endpoint clarification:** MetaQuotes documents an inclusive start date and
+  exclusive end date at midnight, plus automatic history downloads before the requested
+  start; therefore uncertainty about endpoint inclusivity is not a reason to grant a
+  reserve-data exception ([MetaTrader 5, Strategy Testing](https://www.metatrader5.com/en/terminal/help/algotrading/testing)).
+  Any later plan must still reconcile server/UTC bounds and the full history-download
+  scope before asking for specific read approval.
+- **Collector isolation:** main-only development does not mean pulling into the active
+  editable checkout. Unchanged dependency files alone do not establish that replacing
+  source files beneath a running process is safe.
+
+No parity procedure, strategy spec, EA, code, config or registered tolerance was changed
+as part of this follow-up review. The two proposals remain unadopted.
