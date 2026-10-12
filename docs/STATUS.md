@@ -13,7 +13,7 @@ _Last updated: 2026-10-12._
 | 0 Charter, scaffold | Done | `reports/phase_0.md` |
 | 1 MT5 connectivity | Done | `reports/phase_1.md` |
 | 2 Data foundation | Done | `reports/phase_2.md` |
-| 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
+| 3 Simulator | Done except **tester parity** (deferred by the owner 2026-10-12; queue C) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
 | 5 Strategy lab | **Complete; exit gate not met.** The three-family lab is closed (owner, 2026-10-11, V14) and **no deployable strategy was selected**. Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2): m15 and m5 both fail registered gates. Family 2, `opening_range_breakout` 0.1.0: **rejected** by the owner on 2026-10-11 under section 16 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12. Family 3, `vwap_reversion` 0.1.0 draft revision 4: **rejected** by the owner **at B1** on 2026-10-11 for structural sample infeasibility (queue A4, item 5): at most 9 (m15) and 41 (m5) geometry-eligible signals per point, so no point can reach the 100 prior signals that selection needs; never frozen, B2–B9 will not run. Cumulative research trials **N = 66** (54 + 12; B1 recorded none). No family reached the sealed period, which remains unopened. No fourth family, rescue revision or ML work is authorised | `reports/phase_5.md` |
 
@@ -673,14 +673,41 @@ failed".
 
 ### C. User actions (not Claude's)
 
-- **Tester run**: second MT5 in portable mode (`terminal64.exe /portable`, separate folder, own
+- **Tester run: deferred by the owner (2026-10-12, option B).** Phase 3 stays "done except
+  tester parity"; it is not run, Phase 3 is not closed without it, and no phase gate changes.
+  When it is taken up: second MT5 in portable mode (`terminal64.exe /portable`, separate folder, own
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94
   <deals.csv>`. Steps and the settings that must match: `docs/strategies/reference_fixed_time.md`.
 - ~~**Review of the opening_range_breakout first-stage assessment**~~: decided 2026-10-11,
   both variants rejected (queue A3, item 8).
-- **The live tick collector is not running** (last heartbeat 2026-10-10 16:42Z, found
-  2026-10-11). Restart it deliberately when convenient; Claude did not start or touch it.
+- ~~**Restart the live tick collector**~~: **restarted 2026-10-12** (owner, option A), as
+  before, from the dev venv.
+  - **Previous run:** stopped cleanly on SIGBREAK (console closed) at 2026-10-10 16:42:22Z,
+    after 114,853 s, with 230,271 rows in 113 chunks and 0 gaps. The last tick on disk was
+    2026-10-09 20:58:59.071Z, the Friday close, matching the cursor.
+  - **Pre-start:** no STOP or KILL file; MT5 terminal running; 28.0 GB free on C:, data dir
+    0.65 GB.
+  - **Start:** the owner ran `C:\venvs\aurum\Scripts\aurum.exe data collect --log-file
+    C:\aurum-data\logs\collector.jsonl` in their own console (PID 8712), 15:31:53Z. The
+    collector's `started` event is at 15:31:56Z. Claude cannot launch the venv's `aurum.exe`
+    from its process (uv trampoline, os error 2; the junction restriction in Environment
+    facts).
+  - **Gap:** the collector was down 2026-10-10 16:42:22Z … 2026-10-12 15:31:56Z (168,574 s).
+    `events.jsonl` records it as an `outage` with 62,997 market seconds (about 17.5 h, from
+    the Sunday reopen). On restart it re-fetched from the cursor out of the terminal's tick
+    history; the first flush wrote 200,104 rows: 2026-10-11 13,610 rows (first tick
+    22:01:00.083Z) and 2026-10-12 186,494 rows up to 15:36:56.603Z, with no `gap` events.
+    So the outage left no hole in the tick files. The 17.5 market hours came from history,
+    not the live stream; the live-vs-history comparison has not been run on them.
+  - **Verified:** heartbeat advancing (15:32:04, 15:33:04, 15:37:06Z, `running`, connected,
+    last tick < 1 s old); chunks written under `raw_ticks/mt5_live/XAUUSD/`.
+  - It again holds the dev venv's `aurum.exe` open: don't edit `pyproject.toml` on this
+    checkout while it runs (Environment facts). Moving it to a versioned release environment
+    (queue B) is a separate owner decision.
+  - **Live work this week (owner, 2026-10-12):** the collector and data-quality checks of the
+    collected ticks only. No strategy is authorised: none is built, implemented, registered,
+    backtested or run live.
 
 ## Phase 5 conditions (from the reviewer; part of the gate)
 
@@ -710,7 +737,8 @@ failed".
 
 - This checkout runs on the **Windows 11 ARM VM** (`C:\code\aurum`), venv `C:\venvs\aurum`
   (x64 Python under emulation), data `C:\aurum-data` (`AURUM_DATA_DIR`). The live tick
-  collector normally runs there continuously; don't stop it (found stopped on 2026-10-11, see C).
+  collector normally runs there continuously; don't stop it (stopped 2026-10-10, restarted
+  2026-10-12, see C).
 - **Editing `pyproject.toml` on the VM breaks `uv run` while the collector runs.** uv sees the
   file's new mtime, rebuilds the editable install, and fails to replace
   `C:\venvs\aurum\Scripts\aurum.exe` (os error 32), which the collector holds open. Found
