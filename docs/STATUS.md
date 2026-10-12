@@ -40,7 +40,8 @@ them.
 5. **Backup:** the owner copies `C:\aurum-data` to two locations, verified by file count and
    byte size only, with no hashing of sealed files.
 6. **Seal guard:** blocking rejected strategies from the sealed opening in code is accepted in
-   principle; a later change. Design G-B chosen and deferred (queue D, decision 5).
+   principle. Design G-B was chosen and deferred; the later limited authorisation and local
+   implementation are recorded in queue D, G-B implementation below. Not deployed to the VM.
 7. **Tester parity** may stay open until the next P&L-producing run is authorised; it must
    close before that run.
 
@@ -49,7 +50,9 @@ them.
 ### D. Post-closure (owner, 2026-10-12)
 
 The post-closure review (2026-10-12, read-only) produced the record corrections below and the
-open items after them. S1 and the bar backfill (D2) are done; nothing else is authorised.
+open items after them. S1 and the bar backfill (D2) are done. The later owner authorisation
+below permits only G-B implementation with synthetic tests and a public-evidence proposal;
+all other approval boundaries remain.
 
 **Owner decisions (2026-10-12, on the post-closure options).** They bind until the owner
 changes them.
@@ -67,8 +70,9 @@ changes them.
 4. **Tick depth: option (ii), not measured.** Even a timestamp-only probe asks the server about
    a sealed date. Rely on ADR-0007's assumption of about 3.5 months; never re-fetch stored days.
    This replaces the tick-depth re-measure below.
-5. **Seal guard: G-B chosen, deferred.** A strategy status field `draft | frozen | rejected`,
-   with `--open-sealed` refused unless `frozen`. Not built now; it is a **hard precondition**
+5. **Seal guard: G-B chosen, originally deferred.** A strategy status field
+   `draft | frozen | rejected`, with `--open-sealed` refused unless `frozen`. Its deferral
+   was superseded only by the limited authorisation below; it is a **hard precondition**
    for any parity run, `--open-sealed` or backtest authorisation. G-A (config only) and G-C
    (ledger disposition table) are not done.
 6. **No sealed file for forward-test warm-up.** A forward test waits for enough reserve data,
@@ -126,11 +130,38 @@ changes them.
 - ~~**Tick-depth re-measure**~~ (Phase 2 issue 3): **not done, by decision 4.** It was due
   2026-10-23 … 11-06 to learn whether the broker's tick window rolls, but `aurum data depth`
   re-fetches stored days, sealed ones included.
-- **Seal-guard gap.** `--open-sealed` checks only that the strategy's config has `spec:` set
-  (`aurum.backtest.sealed`). The rejected trend_pullback and opening_range_breakout still
-  have it, so only process stops either from spending the one-time opening. **G-B chosen,
-  deferred** (decision 5): required before any parity run, `--open-sealed` or backtest
-  authorisation.
+- **G-B implementation (owner, 2026-10-12 17:41 Europe/London).** The owner explicitly
+  selected **"G-B plus research proposal"** after review of the limited scope. This replaces
+  only G-B's deferral and permits public-evidence research/proposal work, not a new family,
+  strategy implementation, a protocol change or proposal adoption.
+  - **Implemented locally, not pushed or deployed:** validated `StrategyConfig.status`
+    (`draft | frozen | rejected`, missing defaults to `draft`); all three research configs
+    marked `rejected`. `--open-sealed` requires a research family, `frozen` status and a
+    spec path. `prepare` refuses ineligible openings before the pinned snapshot read;
+    `sealed.resolve_access` repeats the guard before any opening journal access.
+  - **Synthetic coverage only:** one new named refusal safety test checks both variants,
+    all rejected families, draft/missing status, enabled flag, absent spec, reference
+    status and combined opening/parity flags. Existing config and one-time-opening tests
+    extended; the allowed opening uses only a private frozen synthetic fixture.
+    The real tester-parity task is not run or closed.
+  - **Scope limits:** the process-lessons proposal's ordinary-grid ban is not adopted or
+    implemented. Reference parity semantics, trading rules, risk, registry, strategy specs,
+    real data, production ledger and sealed period are unchanged. G-B is a config-based
+    eligibility guard, not a tamper-proof approval registry or permission for any run.
+    Source/config hashes necessarily change; historical batches are not reopened.
+  - **Verification and file inventory:** `docs/reviews/2026-10-12_gb_guard_implementation.md`.
+    Work was in an isolated Linux checkout based on `d570119ca55bb1685f0c7653db577690819326e3`,
+    not `C:\code\aurum`; VM state was not inspected or changed.
+  - **Research proposal:** `docs/proposals/2026-10-12_intraday_gold_research_protocol.md`,
+    **PROPOSAL, NOT ADOPTED**. The requested 70–75% win rate is an aspiration, not a verified
+    result or replacement for the net-expectancy/drawdown gates. Both proposals remain
+    subject to separate item-by-item decisions.
+  - **Still required:** owner review and separate push/deployment approval; G-B must be
+    available in the intended run environment before any parity, sealed-opening or backtest
+    authorisation. All run/data-read approvals remain separate. S3 (review 2026-12-15),
+    collector/release-venv/logon, S2a/S2b, VM_SETUP and CRLF work remain untouched.
+    Phase 3 stays "done except tester parity"; Phase 5 stays closed with N = 66 and
+    no deployable strategy. No fourth family, rescue revision or ML is authorised.
 - **CRLF code identity.** 17 working-tree files on the VM have CRLF against `.gitattributes`
   (LF), two under `src/` (`backtest/parity.py`, `strategies/opening_range_breakout.py`).
   `code_identity()` hashes raw bytes, so a batch's source identity depends on the checkout
