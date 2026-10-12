@@ -26,7 +26,8 @@ them.
    development, tuning or re-scoring the 66 trials. Allowed: data QA, spread and latency
    measurement under a pre-commitment (results apply only to future pre-registered families),
    and a later forward test of a frozen candidate. The backtest seal does not cover these
-   dates in code; this ruling does.
+   dates in code; this ruling does. Trading date 2026-10-09 is partial and excluded; the
+   first reserve trading date is 2026-10-12 (queue D, decision 3).
 2. **The seal covers pipeline processing too.** Do not run `aurum data resample` or `aurum
    data qa` over sealed days, and do not rewrite sealed-day rows of the day manifest
    (`canonical_bars/days/<symbol>.parquet`), until a date-bounded pipeline is designed and
@@ -39,7 +40,7 @@ them.
 5. **Backup:** the owner copies `C:\aurum-data` to two locations, verified by file count and
    byte size only, with no hashing of sealed files.
 6. **Seal guard:** blocking rejected strategies from the sealed opening in code is accepted in
-   principle; a later change, proposal only for now.
+   principle; a later change. Design G-B chosen and deferred (queue D, decision 5).
 7. **Tester parity** may stay open until the next P&L-producing run is authorised; it must
    close before that run.
 
@@ -48,7 +49,33 @@ them.
 ### D. Post-closure (owner, 2026-10-12)
 
 The post-closure review (2026-10-12, read-only) produced the record corrections below and the
-open items after them. S1 is done; nothing else is authorised.
+open items after them. S1 and the bar backfill (D2) are done; nothing else is authorised.
+
+**Owner decisions (2026-10-12, on the post-closure options).** They bind until the owner
+changes them.
+
+1. **S3 deferred (option C).** Neither the date-bounded pipeline (S3-A) nor the
+   `forward_reserve_qa` script (S3-B) is built. **Review date: 2026-12-15.**
+2. **One bar backfill authorised** with the existing `aurum data backfill`, explicit range
+   2026-10-09 … the last complete UTC day; no date before 2026-10-09 requested or opened; no
+   resample, qa or depth on any range. Done, D2. Tick history for 2026-10-09 was already
+   backfilled (queue C) and was not repeated.
+3. **Reserve boundary.** Trading date 2026-10-09 opened at 2026-10-08 22:00Z, so its first two
+   hours sit in the sealed UTC file for 2026-10-08. It is **partial and excluded from reserve
+   analysis**; the 2026-10-08 file is never read to complete it. The **first reserve trading
+   date is 2026-10-12** (opened 2026-10-11 22:00Z).
+4. **Tick depth: option (ii), not measured.** Even a timestamp-only probe asks the server about
+   a sealed date. Rely on ADR-0007's assumption of about 3.5 months; never re-fetch stored days.
+   This replaces the tick-depth re-measure below.
+5. **Seal guard: G-B chosen, deferred.** A strategy status field `draft | frozen | rejected`,
+   with `--open-sealed` refused unless `frozen`. Not built now; it is a **hard precondition**
+   for any parity run, `--open-sealed` or backtest authorisation. G-A (config only) and G-C
+   (ledger disposition table) are not done.
+6. **No sealed file for forward-test warm-up.** A forward test waits for enough reserve data,
+   around mid-November, unless the owner rules otherwise.
+
+- **Record note.** Commit `69d9011` carries a `Co-Authored-By` trailer in error, against the
+  CLAUDE.md rule; it stays as pushed (not amended or force-pushed).
 
 - ~~**S1. Record corrections and process-lessons proposal**~~ (docs only, this entry):
   - `reports/phase_5.md`: dated addendum; section 6 said the collector was stopped, stale
@@ -71,17 +98,39 @@ open items after them. S1 is done; nothing else is authorised.
 - **S2b. 2026–27 holidays in `configs/data.yaml`** (needs separate approval). The calendar
   has no entry after 2026-07-03; next: 2026-11-26/27 (Thanksgiving), 2026-12-24/25,
   2027-01-01. Add them before they happen.
-- **S3. Post-seal data handling** (ruling 1 settles the policy; design needs approval). A
-  date-bounded pipeline for dates ≥ 2026-10-09 (bar backfill, ranged resample, QA) that never
-  reads or rewrites sealed-day files or manifest rows (ruling 2).
-- **Tick-depth re-measure** (Phase 2 issue 3, dropped from this file until now): due 2–4
-  weeks after 2026-10-09, i.e. 2026-10-23 … 11-06, to learn whether the broker's tick window
-  rolls. `aurum data depth` re-fetches stored days, sealed ones included, so it needs a
-  date-bounded method under ruling 2 first.
+- **S3. Post-seal data handling: deferred** (decision 1, review 2026-12-15). A date-bounded
+  pipeline for dates ≥ 2026-10-09 (ranged resample, QA) that never reads or rewrites
+  sealed-day files or manifest rows (ruling 2). Until then the reserve has raw files only: no
+  canonical bars, normalized ticks or QA for dates ≥ 2026-10-09.
+- ~~**D2. Bar backfill**~~ (decision 2), **done 2026-10-12 16:30:33–16:30:36Z**.
+  - **Checked in the code first.** `Backfiller.bars` requests only days with no file on disk,
+    one `copy_rates_range` call per 31-day chunk, bounded to [first missing day 00:00Z, last
+    missing day + 1 00:00Z), converted to server time only in the adapter;
+    `MT5Broker.rate_frame` keeps `start ≤ open_time < end`, completed bars only. Here: one call
+    per timeframe for [2026-10-09 00:00Z, 2026-10-12 00:00Z). Files are written with
+    `write_parquet(overwrite=False)`; only `--refetch-empty` (not used) replaces a file, and
+    only an empty one. No local data file is opened, only target paths checked for existence.
+    Connecting reads the account, the symbol and the current quote only.
+  - **Command:** `aurum data backfill --no-ticks --from 2026-10-09 --to 2026-10-11`
+    (2026-10-11 was the last complete UTC day), launched through the `venv_exec.py` wrapper
+    (sha256 `7714dc0e…`, as in queue C); exit 0.
+  - **Result:** 12 files written (3 days × M1, M5, M15, H1), 0 skipped, 0 refilled, no
+    empty-day flag. Report `quality_reports/backfill/20261012T163035906463Z.json`.
+  - **Dates touched:** 2026-10-09, 10-10, 10-11 only. Rows: 10-09 M1 1,259, M5 252, M15 84,
+    H1 21; 10-10 (Saturday) 0, stored empty; 10-11 M1 119, M5 24, M15 8, H1 2. The M1 counts
+    fit the recorded tick spans (last tick 20:58:59Z on 10-09, first 22:01:00Z on 10-11);
+    no bar QA was run.
+  - **Unchanged:** the 2026-10-08 bar files keep their 2026-10-09 08:55Z write times; the
+    collector heartbeat kept advancing. No tick request (history for 10-10/10-11 not fetched),
+    resample, qa or depth.
+- ~~**Tick-depth re-measure**~~ (Phase 2 issue 3): **not done, by decision 4.** It was due
+  2026-10-23 … 11-06 to learn whether the broker's tick window rolls, but `aurum data depth`
+  re-fetches stored days, sealed ones included.
 - **Seal-guard gap.** `--open-sealed` checks only that the strategy's config has `spec:` set
   (`aurum.backtest.sealed`). The rejected trend_pullback and opening_range_breakout still
-  have it, so only process stops either from spending the one-time opening. Code guard
-  accepted in principle (ruling 6), not built.
+  have it, so only process stops either from spending the one-time opening. **G-B chosen,
+  deferred** (decision 5): required before any parity run, `--open-sealed` or backtest
+  authorisation.
 - **CRLF code identity.** 17 working-tree files on the VM have CRLF against `.gitattributes`
   (LF), two under `src/` (`backtest/parity.py`, `strategies/opening_range_breakout.py`).
   `code_identity()` hashes raw bytes, so a batch's source identity depends on the checkout
