@@ -1,5 +1,19 @@
 # opening_range_breakout — strategy spec
 
+> **Result (2026-10-11): REJECTED** by the owner under section 16. m15 fails gates 2, 3, 4, 7,
+> 8, 9 and 12; m5 fails gates 3, 4, 7, 8, 9 and 12; both pass 1, 6 and 13. Gates 5, 10 and 11
+> were not evaluated. No candidate is selected and none goes to the sealed test. The 12
+> development trials ran on 2026-10-11 after the reviewer approved them at `b5ea565`; they
+> stay in the cumulative count (N = 66). Evidence:
+> `docs/strategies/evidence/opening_range_breakout_2026-10-11_dev_analysis.md`; decision
+> record: `docs/STATUS.md` queue A3, item 8. The spec stays frozen 0.1.0 and its rules are
+> unchanged. This version is not rerun or changed to rescue it. Any revision is a new,
+> explicitly post-results hypothesis whose trials add to N.
+>
+> *Banner added 2026-10-12 (record correction); the status paragraph below is the freeze-time
+> text. Its "Not approved" list describes the freeze approval only; the 12 trials were
+> approved and run later.*
+>
 > **Status: FROZEN 0.1.0 (2026-10-11).** The reviewer approved revision 2 for freezing,
 > implementation and deterministic tests only, with four documentation corrections (change
 > log). O1–O8 are frozen; no trading rule changed. Not approved: development backtests, P&L,
@@ -745,3 +759,4 @@ values are reproduced in evidence §6, which uses no price after each spending c
 | 0.1.0 (draft) | 2026-10-11 | Initial draft: two opening ranges (08:00 London, 09:30 New York), first close outside the range at M15 or M5, opposite-side stop + 20 points, 500/2,000-point bounds, 120-minute window and timeout, blackout instants not eligible, 12-trial grid, gates adapted from trend_pullback with the corrected gate 13 and an explicit evaluation order. Decisions O1–O8 open | Reviewer authorised the spec draft only (2026-10-11), after trend_pullback 0.2.0 was rejected |
 | 0.1.0 (draft, revision 2) | 2026-10-11 | O1–O8 recorded as accepted in principle. **No rule changed.** Corrects the m5 latest decision times (10:55 London; 11:25 or 12:25 New York) and the timeout and news-exposure examples, mismatch weeks included. Separates strategy warm-up (none) from the risk engine's 100-bar M15 ATR history. Commits the feasibility script and evidence, reconciles the two O3 populations and lists every data-informed choice. Describes the anchors as research anchors and states that a rejected family does not disprove its filters. Defines behaviour with missing training samples and the exact diagnostic counters. Writes out the short stop arithmetic and the fixed, unlinked 20-point buffer | Reviewer's revision request (2026-10-11) |
 | 0.1.0 (frozen) | 2026-10-11 | Frozen for implementation and deterministic tests only. **No trading rule changed.** Four documentation corrections: (1) the feasibility script loads whole development files, so the spec now says no price after a spending close is *used* for any fill, exit, return or P&L, not that none was read; (2) a timeout deadline requests a close and does not guarantee a fill, and a signal while an earlier position or order remains is still rejected (exposure); (3) `stop_below_minimum` is `d < max(500, trade_stops_level + 10)`, not `d < 500`; (4) an undefined candidate Sharpe ratio or an undefined V fails gate 12, and undefined trial SRs stay in N, are listed, and are left out of V. The engine's 100-bar M15 history is merged with the strategy warm-up by maximum per timeframe | Reviewer's freeze approval (2026-10-11) |
+| 0.1.0 (frozen, rejected) | 2026-10-12 | Record correction only: rejection banner at the top (owner decision of 2026-10-11 under section 16: m15 fails gates 2, 3, 4, 7, 8, 9, 12; m5 fails 3, 4, 7, 8, 9, 12; gates 5, 10, 11 not evaluated). The freeze-time status paragraph is kept and labelled as such. **No rule changed; not unfrozen.** | The header still described the freeze approval ("Not approved: … the 12 trials") after the trials ran and the family was rejected (post-closure review, 2026-10-12) |

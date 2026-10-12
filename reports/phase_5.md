@@ -147,6 +147,19 @@ Scripts: `scripts/trend_pullback_dev_analysis.py`, `scripts/opening_range_breako
 
 - **Tester parity** (queue C): the user's MT5 Strategy Tester run.
 - **Tick collector stopped:** last heartbeat 2026-10-10 16:42Z, found 2026-10-11. Claude has
-  not started or touched it.
+  not started or touched it. *(Stale since 2026-10-12 15:31:53Z: see the addendum below.)*
 - Phase 6 has not started; it needs a strategy that passes Phase 5. No next step is
   authorised.
+
+## Addendum (2026-10-12): correction to section 6
+
+- **The collector item in section 6 is stale.** This report was committed (`4fc0a9c`) a few
+  minutes before the owner restarted the live tick collector, from the dev venv, at
+  **2026-10-12 15:31:53Z** (the collector's `started` event is 15:31:56Z). On restart it
+  re-fetched the outage (2026-10-10 16:42:22Z … 2026-10-12 15:31:56Z, 62,997 market seconds)
+  from the terminal's tick history: 200,104 rows, no `gap` events. It has run continuously
+  since. Details: `docs/STATUS.md` queue C.
+- The other section 6 items are unchanged: tester parity stays open (owner ruling of
+  2026-10-12: it must close before the next P&L-producing run is authorised), and Phase 6 has
+  not started.
+- Nothing else in this report changes: no verdict, trial count (N = 66) or evidence.

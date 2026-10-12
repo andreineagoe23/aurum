@@ -15,9 +15,82 @@ _Last updated: 2026-10-12._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (deferred by the owner 2026-10-12; queue C) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **Complete; exit gate not met.** The three-family lab is closed (owner, 2026-10-11, V14) and **no deployable strategy was selected**. Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2): m15 and m5 both fail registered gates. Family 2, `opening_range_breakout` 0.1.0: **rejected** by the owner on 2026-10-11 under section 16 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12. Family 3, `vwap_reversion` 0.1.0 draft revision 4: **rejected** by the owner **at B1** on 2026-10-11 for structural sample infeasibility (queue A4, item 5): at most 9 (m15) and 41 (m5) geometry-eligible signals per point, so no point can reach the 100 prior signals that selection needs; never frozen, B2–B9 will not run. Cumulative research trials **N = 66** (54 + 12; B1 recorded none). No family reached the sealed period, which remains unopened. No fourth family, rescue revision or ML work is authorised | `reports/phase_5.md` |
+| 5 Strategy lab | **Complete; exit gate not met.** The three-family lab is closed (owner, 2026-10-11, V14) and **no deployable strategy was selected**. Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2): m15 and m5 both fail registered gates. Family 2, `opening_range_breakout` 0.1.0: **rejected** by the owner on 2026-10-11 under section 16 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12. Family 3, `vwap_reversion` 0.1.0 draft revision 4: **rejected** by the owner **at B1** on 2026-10-11 for structural sample infeasibility (queue A4, item 5): at most 9 (m15) and 41 (m5) geometry-eligible signals per point, so no point can reach the 100 prior signals that selection needs; never frozen, B2–B9 will not run. Cumulative research trials **N = 66** (54 + 12; B1 recorded none). No family reached the sealed period, which remains unopened. No fourth family, rescue revision or ML work is authorised. **Programme paused to collect data** (owner ruling 3, 2026-10-12) | `reports/phase_5.md` |
+
+## Owner rulings (2026-10-12, after the post-closure review)
+
+Given on the read-only post-closure review of 2026-10-12. They bind until the owner changes
+them.
+
+1. **Forward reserve.** Data dated **≥ 2026-10-09** is a forward reserve, never used for
+   development, tuning or re-scoring the 66 trials. Allowed: data QA, spread and latency
+   measurement under a pre-commitment (results apply only to future pre-registered families),
+   and a later forward test of a frozen candidate. The backtest seal does not cover these
+   dates in code; this ruling does.
+2. **The seal covers pipeline processing too.** Do not run `aurum data resample` or `aurum
+   data qa` over sealed days, and do not rewrite sealed-day rows of the day manifest
+   (`canonical_bars/days/<symbol>.parquet`), until a date-bounded pipeline is designed and
+   approved (queue D, S3).
+3. **Programme direction: pause and collect.** No fourth family, and no "no edge found"
+   closure yet.
+4. **DSR:** cumulative N and mixed V (variance over all research trials, across families)
+   stay for now. The policy question is in `docs/proposals/2026-10-12_process_lessons.md`. No
+   verdict changes.
+5. **Backup:** the owner copies `C:\aurum-data` to two locations, verified by file count and
+   byte size only, with no hashing of sealed files.
+6. **Seal guard:** blocking rejected strategies from the sealed opening in code is accepted in
+   principle; a later change, proposal only for now.
+7. **Tester parity** may stay open until the next P&L-producing run is authorised; it must
+   close before that run.
 
 ## Work queue (in order)
+
+### D. Post-closure (owner, 2026-10-12)
+
+The post-closure review (2026-10-12, read-only) produced the record corrections below and the
+open items after them. S1 is done; nothing else is authorised.
+
+- ~~**S1. Record corrections and process-lessons proposal**~~ (docs only, this entry):
+  - `reports/phase_5.md`: dated addendum; section 6 said the collector was stopped, stale
+    since the restart at 2026-10-12 15:31:53Z.
+  - `docs/strategies/opening_range_breakout.md`: rejection banner and change-log row. Its
+    header still described the freeze approval ("Not approved: … the 12 trials"). No rule
+    changed; the spec stays frozen 0.1.0.
+  - `docs/data_quality/2026-10-12_collected_ticks.md`: dated correction. `aurum data
+    resample` accepts `--from/--to` and each day reads only its own files, but it reads and
+    rewrites the whole day manifest (sealed-day metadata rows); no broker bars exist for
+    dates ≥ 2026-10-09, so those days would be `unverified`.
+  - `docs/proposals/2026-10-12_process_lessons.md`: **PROPOSAL, NOT ADOPTED**.
+  - Checked and consistent: N = 66 = 54 + 12 (evidence indexes 54 and 12 rows, DSR trial
+    list 66 rows; 76 ledger rows = 66 + 10 reference, per the recorded backup, ledger not
+    re-read); every evaluated variant fails at least one registered gate other than 12.
+- **S2a. Raw-data backup** (owner action, ruling 5). Nothing outside `C:\aurum-data` holds the
+  raw data; the ledger backups are on the same C: drive. Raw ticks older than about 3.5 months
+  cannot be re-fetched at full fidelity (ADR-0007), and the broker's tick window may be
+  rolling. 708 MB on 2026-10-12.
+- **S2b. 2026–27 holidays in `configs/data.yaml`** (needs separate approval). The calendar
+  has no entry after 2026-07-03; next: 2026-11-26/27 (Thanksgiving), 2026-12-24/25,
+  2027-01-01. Add them before they happen.
+- **S3. Post-seal data handling** (ruling 1 settles the policy; design needs approval). A
+  date-bounded pipeline for dates ≥ 2026-10-09 (bar backfill, ranged resample, QA) that never
+  reads or rewrites sealed-day files or manifest rows (ruling 2).
+- **Tick-depth re-measure** (Phase 2 issue 3, dropped from this file until now): due 2–4
+  weeks after 2026-10-09, i.e. 2026-10-23 … 11-06, to learn whether the broker's tick window
+  rolls. `aurum data depth` re-fetches stored days, sealed ones included, so it needs a
+  date-bounded method under ruling 2 first.
+- **Seal-guard gap.** `--open-sealed` checks only that the strategy's config has `spec:` set
+  (`aurum.backtest.sealed`). The rejected trend_pullback and opening_range_breakout still
+  have it, so only process stops either from spending the one-time opening. Code guard
+  accepted in principle (ruling 6), not built.
+- **CRLF code identity.** 17 working-tree files on the VM have CRLF against `.gitattributes`
+  (LF), two under `src/` (`backtest/parity.py`, `strategies/opening_range_breakout.py`).
+  `code_identity()` hashes raw bytes, so a batch's source identity depends on the checkout
+  (known for ORB, `…_dev_launch.md`; not fixed).
+- **VM_SETUP §13 conflicts.** The documented daily task (`scripts/daily_data.ps1`) runs
+  `aurum data resample` and `aurum data qa --strict` over every day, sealed ones included,
+  against ruling 2; and the logon task points at the dev venv's `aurum.exe`, against the
+  planned release venv (queue B decision below). Neither task is registered; don't register
+  either as written.
 
 ### A. Before Phase 5 starts (reviewer decisions, 2026-10-10)
 
@@ -675,6 +748,8 @@ failed".
 
 - **Tester run: deferred by the owner (2026-10-12, option B).** Phase 3 stays "done except
   tester parity"; it is not run, Phase 3 is not closed without it, and no phase gate changes.
+  It may stay open until the next P&L-producing run is authorised and must close before that
+  run (owner ruling 7, 2026-10-12).
   When it is taken up: second MT5 in portable mode (`terminal64.exe /portable`, separate folder, own
   data dir) so the live collector keeps running. Run `mql5/AurumReference.mq5`, export deals CSV
   + HTML report, then `aurum backtest parity 20261009T221629Z_reference_fixed_time_m5_be6c94

@@ -26,9 +26,21 @@ The command would breach the date limit (`src/aurum/data/qa.py`):
 - `_fidelity_by_day` reads the whole day manifest, sealed days included.
 
 It would also say little: canonical bars and normalized ticks for ≥ 2026-10-09 do not exist,
-because `aurum data resample` was not run (it rebuilds every day, sealed ones too). So
-market-hour gaps, stale quotes and QA's spread flags are **not reported here**. Section 4
-covers spreads directly.
+because `aurum data resample` was not run (it rebuilds every day, sealed ones too; corrected
+below). So market-hour gaps, stale quotes and QA's spread flags are **not reported here**.
+Section 4 covers spreads directly.
+
+> **Correction (2026-10-12, post-closure review).** The parenthesis above is inaccurate.
+> `aurum data resample` accepts `--from/--to`, and each day's build (`pipeline.build_day`)
+> reads only that day's raw files. Without a range it does rebuild every day. Even with a
+> range, it reads and rewrites the whole day manifest (`canonical_bars/days/<symbol>.parquet`,
+> `write_day_manifest`), which holds metadata rows for sealed days (fidelity and mismatch
+> counts, no prices), and it reads the newest spec snapshot for the symbol and point. No raw
+> broker bars exist for dates ≥ 2026-10-09 (the backfill in section 3 used `--no-bars`), so
+> those days would come out with tick fidelity `unverified`. Under the owner's ruling of
+> 2026-10-12 the seal also covers pipeline processing: no `resample` or `qa` runs over sealed
+> days and no sealed-day manifest row is rewritten until a date-bounded pipeline is designed
+> and approved (`docs/STATUS.md`, queue D, S3). The conclusion of this section is unchanged.
 
 **Collector journal** (`collector/XAUUSD/events.jsonl`, not market data; it starts
 2026-10-09 08:48:09Z): 2 `started`, 1 `stopped`, 1 `outage`, 20 `pause` (46,882 s in all,
