@@ -4,7 +4,7 @@ Where the project stands and what comes next. Update it whenever a phase, a deci
 work queue changes. History lives in `reports/phase_<n>.md`; rules in `CLAUDE.md`; the full spec
 in `docs/MASTER_PROMPT.md`; the code map in `docs/ARCHITECTURE.md`.
 
-_Last updated: 2026-10-11._
+_Last updated: 2026-10-12._
 
 ## Phases
 
@@ -15,7 +15,7 @@ _Last updated: 2026-10-11._
 | 2 Data foundation | Done | `reports/phase_2.md` |
 | 3 Simulator | Done except **tester parity** (waiting for the user's MT5 Strategy Tester export) | `reports/phase_3.md` |
 | 4 Risk + execution | **Approved** by the user's reviewer 2026-10-10 | `reports/phase_4.md` |
-| 5 Strategy lab | **In progress.** Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2). m15 and m5 both fail registered gates, and no candidate goes to the sealed test. Family 2, `opening_range_breakout`: spec **0.1.0 frozen** 2026-10-11 with the reviewer's four corrections; implementation approved at `b5ea565`; **the 12 development trials ran** 2026-10-11 (12 attempts, 12 trials, 0 failures); **rejected** by the owner on 2026-10-11 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12; no candidate selected, evaluation stopped. Family 3, `vwap_reversion`: draft 0.1.0 revision 4; B0 decided 2026-10-11 (V1–V17 accepted, V17 explicitly); **B1 feasibility diagnostic authorised** 2026-10-11 with rulings R1–R6 and **run** (methodology `a09b196`): at most 9 (m15) and 41 (m5) geometry-eligible signals per point over the whole development period, and no point reaches the 100 prior signals that selection needs; awaiting the owner's decision; not frozen; nothing beyond B1 authorised (queue A4) | — |
+| 5 Strategy lab | **Complete; exit gate not met.** The three-family lab is closed (owner, 2026-10-11, V14) and **no deployable strategy was selected**. Family 1, `trend_pullback` 0.2.0 + amendment A1: **rejected** by the reviewer on 2026-10-11 (queue A2): m15 and m5 both fail registered gates. Family 2, `opening_range_breakout` 0.1.0: **rejected** by the owner on 2026-10-11 under section 16 (queue A3, item 8): m15 fails gates 2, 3, 4, 7, 8, 9, 12 and m5 fails gates 3, 4, 7, 8, 9, 12. Family 3, `vwap_reversion` 0.1.0 draft revision 4: **rejected** by the owner **at B1** on 2026-10-11 for structural sample infeasibility (queue A4, item 5): at most 9 (m15) and 41 (m5) geometry-eligible signals per point, so no point can reach the 100 prior signals that selection needs; never frozen, B2–B9 will not run. Cumulative research trials **N = 66** (54 + 12; B1 recorded none). No family reached the sealed period, which remains unopened. No fourth family, rescue revision or ML work is authorised | `reports/phase_5.md` |
 
 ## Work queue (in order)
 
@@ -627,9 +627,31 @@ failed".
      price equalities that never changed a classification: break 188, extreme 642,
      rejection 119; deviation, ER and room: 0.
    - **Data-informed from here on.** Every later choice about this family is made knowing
-     these counts. Nothing is proposed here: the owner decides what follows. Not done: B2,
-     freeze, implementation, config or registry change, backtest, P&L, ledger, trial, parity,
-     sealed access.
+     these counts. Nothing was proposed with this result; the owner decided what follows
+     (item 5). Not done: B2, freeze, implementation, config or registry change, backtest, P&L,
+     ledger, trial, parity, sealed access.
+5. **Owner decision (2026-10-11): vwap_reversion 0.1.0 draft revision 4 is rejected at B1 as
+   structurally infeasible under its accepted rules.** This family ends, and with it the
+   three-family Phase 5 lab (V14).
+   - **Basis:** methodology `a09b1964eeb39dbb75e35c50130eb35f206d4a0b`, result
+     `6c18e54992fd945864eb0958113a1630031e52cd`. m15 produces only 7–9 geometry-eligible
+     signals per point and m5 only 21–41; the maximum strictly before fold 1 is 3; no point
+     reaches 100 at any selection boundary or over the whole period. Geometry-eligible
+     signals are an upper bound on eventual trades, so no fold can select a point and no
+     frozen configuration can exist under section 16.
+   - **A rejection, not a freeze and not an implementation authorisation.** The spec stays
+     draft revision 4, never frozen, with a post-B1 disposition (spec section 18d).
+   - **B2–B9 will not run.** No snapshot read, implementation, config, registry, trace,
+     backtest, P&L, ledger access, trial, parity access or sealed access occurred for this
+     family. B5, the tester-parity decision for this family, was never reached.
+   - **Cumulative research trials remain N = 66** (54 trend_pullback + 12 ORB, reference
+     trials excluded): B1 was descriptive and recorded no trial.
+   - **Evidence, unchanged:** the B1 script, report, CSV and run record. B1 is reproducible
+     only from `a09b196`: the script refuses to run unless the spec's git blob is revision 4's,
+     and the disposition added to the spec changes that blob.
+   - Any revival would be a new, explicitly authorised, data-informed hypothesis, not a
+     continuation of 0.1.0. **No fourth family, rescue revision or ML work is authorised.**
+   - Phase report: `reports/phase_5.md`.
 
 ### B. Later, tracked
 
@@ -667,8 +689,8 @@ failed".
   reviewer's request, 0.2.0 approved 2026-10-10, rejected 2026-10-11 (queue A2).
   Opening-range breakout: 0.1.0 frozen and implemented; its 12 development trials ran on
   2026-10-11; rejected by the owner on 2026-10-11 (queue A3). Then VWAP reversion: draft
-  0.1.0 revision 4, B0 decided and B1 authorised 2026-10-11, not frozen, nothing beyond B1
-  authorised (queue A4).
+  0.1.0 revision 4, never frozen, rejected by the owner at B1 on 2026-10-11 (queue A4). The
+  three-family lab is closed (`reports/phase_5.md`).
 - Report `stop_above_cap` counts per candidate (`docs/VALIDATION_PROTOCOL.md`).
 - Every trial in the ledger. A **hold-out period** never touched during search.
 - Report **gross vs net**. Apply a **Deflated-Sharpe-style** correction to the best candidate.

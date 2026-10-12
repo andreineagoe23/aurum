@@ -1,7 +1,12 @@
 # vwap_reversion — strategy spec
 
-> **DRAFT — NOT FROZEN — NOT IMPLEMENTED — NO TRIALS AUTHORISED.**
+> **REJECTED AT B1 (owner, 2026-10-11) — DRAFT REVISION 4, NEVER FROZEN — NOT IMPLEMENTED —
+> NO TRIALS.**
 >
+> - **Disposition:** the owner rejected vwap_reversion 0.1.0 draft revision 4 at B1 as
+>   structurally infeasible under its accepted rules. This family ends, and with it the
+>   three-family Phase 5 lab. See section 18d. The rules below are kept unchanged as the
+>   preregistered draft they were; nothing after B1 (B2–B9) will run.
 > - Written by Claude from `docs/STRATEGY_SPEC_TEMPLATE.md` at the owner's request
 >   (2026-10-11: "documentation-only draft of vwap_reversion 0.1.0"). Revision 2 answered the
 >   owner's first B0 review; revision 3 applies the B0 audit's documentation corrections;
@@ -1252,6 +1257,44 @@ and 6.5, where they also bind the implementation.
 - **Consequence.** Every later choice about this family is made knowing the B1 counts and is
   listed as data-informed (section 18b).
 
+## 18d. Post-B1 disposition (owner, 2026-10-11)
+
+Added after B1. It changes no rule above and no part of the B1 record in section 18c.
+
+**Decision.** The owner rejected vwap_reversion 0.1.0 draft revision 4 at B1 as structurally
+infeasible under its accepted rules, and ended the family. This is a rejection, not a freeze
+and not an implementation authorisation. Under V14 (section 16) the three-family Phase 5 lab
+is closed.
+
+**Basis** (development period 2020-12-15 … 2025-09-30, per grid point):
+
+- m15 produces only 7–9 geometry-eligible signals, m5 only 21–41;
+- the maximum strictly before fold 1 is 3;
+- no point reaches 100 prior signals at any selection boundary, or over the whole period;
+- geometry-eligible signals are an upper bound on eventual trades (section 18c), so no fold
+  can select a point and no frozen configuration can exist under section 16.
+
+**Evidence** (committed, unchanged by this disposition):
+
+- methodology commit `a09b1964eeb39dbb75e35c50130eb35f206d4a0b`: this spec at revision 4 and
+  `scripts/vwap_reversion_feasibility.py` with its synthetic tests;
+- result commit `6c18e54992fd945864eb0958113a1630031e52cd`:
+  `docs/strategies/evidence/vwap_reversion_2026-10-11_b1_feasibility.md`, `.csv` and
+  `…_b1_run.md`.
+
+The script refuses to run unless this file's git blob is revision 4's
+(`22d1ffac…`). This section changes the blob, so B1 is reproduced from `a09b196`, not from a
+later commit.
+
+**What did not happen.** B2–B9 will not run. No snapshot read, implementation, config,
+registry, trace, backtest, P&L, ledger access, trial, parity access or sealed access occurred
+for this family. Cumulative research trials stay **N = 66** (54 trend_pullback + 12
+opening_range_breakout): B1 was descriptive and recorded no trial.
+
+**Revival.** Any future revival would be a new, explicitly authorised, data-informed
+hypothesis, made knowing the B1 counts. It is not a continuation of 0.1.0. No fourth family,
+rescue revision or ML work is authorised (`docs/STATUS.md`, `reports/phase_5.md`).
+
 ## 19. Change log
 
 | Version | Date | Change | Reason |
@@ -1260,3 +1303,4 @@ and 6.5, where they also bind the implementation.
 | 0.1.0 (draft, rev. 2) | 2026-10-11 | Short rules written out (table 5a; V16). Setup window `Ts ≤ E − 45` (V13): same setups and latest decision `E − 15` in both variants. Exact decision-instant, blackout and deadline tables (6.1, 10.2); explicit hold bounds 12:15 / 17:45 London with a construction-time check (V9); the timeout claim corrected from "closes" to "requests a close". Causal rules made explicit: TWV bars per rule, target fixed at T, setup life cycle, spend after risk or broker rejection (6.2, 6.3). Variant differences stated (6.4). Geometry split into necessary / executable / cost (13); the 9.75 USD derivation written out; the double-counted short spread removed (costs 0.8–4.1%, not 0.8–5.4%); break-even rates recomputed. Long sizing distance includes the spread (8a floors 8,038–8,118). Intra-bar evidence and its limits (8.2); statistics from dates now sealed disclosed (V17). Short synthetic trace. No data read | Owner's B0 review (2026-10-11) |
 | 0.1.0 (draft, rev. 3) | 2026-10-11 | B0 corrections, documentation only. Decision instants defined as `A + 60 min < T ≤ E − 15 min`; other OPEN calls return and count nothing (fixes `twv_undefined` at `T = A`). Session-date statuses given an explicit precedence (6.5). V17 disclosure completed (V5, V6, the 13.3 cost illustration behind V8, section 2, the release-spike remarks). B2 made an explicitly authorised, hash-checked pinned-snapshot read of the 8a inputs and `trade_stops_level` only, recorded before freezing. Wording: closing-side stops-level quote (13.2); the exact ADR-0009 §9 gate-11 rule (8.2); `atr_period` source (3.2); M15 slot completeness at non-M15 instants; ORB §16 applies verbatim where section 16 is silent, five details restated; MASTER_PROMPT paraphrase labelled; `setups_expired` excludes replaced setups; clipped session ends; complete FOMC-mismatch and early-cutoff lists, 45-minute cutoff never binding; mirror-property test constraint (18a). B0 decision recorded (V1–V17 accepted). **No trading rule changed; no market data, ledger or snapshot was read.** Audit and patch: `docs/strategies/evidence/vwap_reversion_2026-10-11_b0_audit.{md,patch}` | Owner accepted the B0 audit (2026-10-11) |
 | 0.1.0 (draft, rev. 4) | 2026-10-11 | B1 diagnostic and access clarifications, documentation only. Rulings R1–R6 recorded (new section 18c) and written into sections 5 (R5 classification), 6.2 (R2–R4 order within an instant) and 6.5 (R1 precedence and `would_fail_*` flags; counter definitions); ER denominator summed with `math.fsum` (section 4); numerical rulings (provisional `point` and `trade_stops_level`, exact comparisons with near-boundary reporting, warm-up exactly by bar count, "geometry-eligible signals, never trades"); intended command and output schema; section 15 wording; B1 marked authorised in 18b. **No market data had yet been read** (no bars, ticks, ledger rows or snapshot) **and no trading rule changed.** Not frozen | Owner's B1 authorisation and rulings (2026-10-11) |
+| 0.1.0 (draft, rev. 4): **rejected** | 2026-10-11 | Disposition only: header and new section 18d. The owner rejected the family at B1 for structural sample infeasibility (at most 9 m15 and 41 m5 geometry-eligible signals per point; none reaches 100 prior signals). B2–B9 will not run; N stays 66. Never frozen. **No rule, ruling or B1 record changed** | Owner's post-B1 decision (2026-10-11); evidence `a09b196`, `6c18e54` |
